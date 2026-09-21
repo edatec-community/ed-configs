@@ -1,0 +1,26 @@
+version = 1
+
+[options.wifi]
+code_bit = 30
+config_lines = ["dtparam=ant2"]
+
+[options.camera]
+code_bit = 29
+cm4_config_lines = ["dtoverlay=imx219"]
+cm5_config_lines = ["dtoverlay=imx219,cam0"]
+
+[options.supercapacitor]
+code_bit = 6
+
+[options."lte.4g"]
+code_shift = 4
+code_width = 2
+code_value = 1
+exclusive_group = "lte"
+
+[options."lte.5g"]
+code_shift = 4
+code_width = 2
+code_value = 2
+exclusive_group = "lte"
+

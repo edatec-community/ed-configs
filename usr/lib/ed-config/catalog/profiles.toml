@@ -1,0 +1,86 @@
+version = 1
+
+# A profile is one unique software configuration. A model selects a profile
+# independently from the hardware identity used to calculate PRODUCT.
+
+[[profiles]]
+id = "HMI2120_070C"
+default_model = "HMI2120_070C"
+components = ["screen.cm4.h070c", "mainboard.ipc2100", "core.cm4", "interface.uart.cm4"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "HMI2120_101C"
+default_model = "HMI2120_101C"
+components = ["screen.cm4.h101c", "mainboard.ipc2100", "core.cm4", "interface.uart.cm4"]
+disable_config_on_ubuntu = true
+screen_config = "h101c"
+
+[[profiles]]
+id = "IPC2110"
+default_model = "IPC2110"
+components = ["mainboard.ipc2100", "core.cm4", "interface.uart.cm4"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "HMI2630_101C"
+default_model = "HMI2632_101C"
+components = ["screen.cm4.h101c", "mainboard.ipc2600", "core.cm4", "interface.can.cm4.two", "interface.uart.cm4"]
+disable_config_on_ubuntu = true
+screen_config = "h101c"
+
+[[profiles]]
+id = "IPC2610"
+default_model = "IPC2612"
+components = ["mainboard.ipc2600", "core.cm4", "interface.uart.cm4"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "IPC2620"
+default_model = "IPC2622"
+components = ["mainboard.ipc2600", "core.cm4", "interface.can.cm4.one", "interface.uart.cm4"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "IPC2630"
+default_model = "IPC2632"
+components = ["mainboard.ipc2600", "core.cm4", "interface.can.cm4.two", "interface.uart.cm4"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "HMI3120_070C"
+default_model = "HMI3120_070C"
+components = ["screen.cm5.h070c", "mainboard.ipc3100", "core.cm5", "interface.uart.cm5"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "HMI3120_101C"
+default_model = "HMI3120_101C"
+components = ["screen.cm5.h101c", "mainboard.ipc3100", "core.cm5", "interface.uart.cm5"]
+disable_config_on_ubuntu = true
+screen_config = "h101c"
+
+[[profiles]]
+id = "IPC3110"
+default_model = "IPC3110"
+components = ["mainboard.ipc3100", "core.cm5", "interface.uart.cm5"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "HMI3630_101C"
+default_model = "HMI3632_101C"
+components = ["screen.cm5.h101c", "mainboard.ipc3600", "core.cm5", "interface.can.cm5.two", "interface.uart.cm5"]
+disable_config_on_ubuntu = true
+screen_config = "h101c"
+
+[[profiles]]
+id = "IPC3630"
+default_model = "IPC3632"
+components = ["mainboard.ipc3600", "core.cm5", "interface.can.cm5.two", "interface.uart.cm5"]
+disable_config_on_ubuntu = true
+
+[[profiles]]
+id = "CM4SEN"
+default_model = "CM4SEN"
+components = ["special.cm4sen"]
+

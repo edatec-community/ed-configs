@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ED_CONFIG_LIBDIR="$ROOT/usr/lib/ed-config" exec "$ROOT/usr/sbin/ed-config" "$@"
+

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+LIBDIR=${ED_CONFIG_LIBDIR:-/usr/lib/ed-config}
+
+# Permit execution directly from the source tree without changing the paths
+# used by an installed image.
+if [ ! -f "$LIBDIR/main.py" ]; then
+    SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+    LIBDIR=$(CDPATH= cd -- "$SCRIPT_DIR/../lib/ed-config" && pwd)
+fi
+
+exec python3 "$LIBDIR/main.py" "$@"
+

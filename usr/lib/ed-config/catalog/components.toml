@@ -1,0 +1,282 @@
+version = 1
+
+# Reusable hardware/configuration components.
+# Config blocks are ordered globally so products only name semantic components.
+
+[components."core.cm4"]
+
+[[components."core.cm4".config_blocks]]
+order = 30
+lines = [
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=uart5",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+]
+
+[[components."core.cm4".config_blocks]]
+order = 40
+lines = [
+  "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+  "enable_uart=1",
+  "dtparam=i2c_vc=on",
+]
+
+[components."core.cm5"]
+
+[[components."core.cm5".config_blocks]]
+order = 30
+lines = [
+  "dtoverlay=uart1",
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+]
+
+[[components."core.cm5".config_blocks]]
+order = 40
+lines = [
+  "dtoverlay=sdio-pi5",
+  "dtparam=rtc=off",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
+]
+
+[[components."core.cm5".config_blocks]]
+order = 60
+lines = [
+  "dtparam=i2c_vc=on",
+]
+
+[components."mainboard.ipc2100"]
+
+[[components."mainboard.ipc2100".config_blocks]]
+order = 20
+lines = [
+  "dtoverlay=ed-ipc,ipc2100",
+]
+
+[components."mainboard.ipc2600"]
+
+[[components."mainboard.ipc2600".config_blocks]]
+order = 20
+lines = [
+  "dtoverlay=ed-ipc,ipc2600",
+]
+
+[components."mainboard.ipc3100"]
+
+[[components."mainboard.ipc3100".config_blocks]]
+order = 20
+lines = [
+  "dtoverlay=ed-ipc,ipc3100",
+]
+
+[[components."mainboard.ipc3100".config_blocks]]
+order = 50
+lines = [
+  "enable_uart=1",
+]
+
+[components."mainboard.ipc3600"]
+
+[[components."mainboard.ipc3600".config_blocks]]
+order = 20
+lines = [
+  "dtoverlay=ed-ipc,ipc3600",
+]
+
+[[components."mainboard.ipc3600".config_blocks]]
+order = 55
+lines = [
+  "force_eeprom_read=0",
+  "disable_poe_fan=1",
+]
+
+[components."screen.cm4.h070c"]
+
+[[components."screen.cm4.h070c".config_blocks]]
+order = 10
+lines = [
+  "dtoverlay=vc4-kms-dsi-edatec-panel-070c,interrupt=7",
+]
+
+[components."screen.cm4.h101c"]
+
+[[components."screen.cm4.h101c".config_blocks]]
+order = 10
+lines = [
+  "dtoverlay=vc4-kms-dsi-edatec-panel-101c,interrupt=7",
+]
+
+[components."screen.cm5.h070c"]
+
+[[components."screen.cm5.h070c".config_blocks]]
+order = 10
+lines = [
+  "dtoverlay=vc4-kms-dsi-edatec-panel-070c,i2c4,interrupt=7",
+]
+
+[components."screen.cm5.h101c"]
+
+[[components."screen.cm5.h101c".config_blocks]]
+order = 10
+lines = [
+  "dtoverlay=vc4-kms-dsi-edatec-panel-101c,i2c4,interrupt=7",
+]
+
+[components."interface.can.cm4.one"]
+rule_profiles = ["interface.can.cm4.one"]
+
+[[components."interface.can.cm4.one".config_blocks]]
+order = 35
+lines = [
+  "dtoverlay=spi6-2cs,cs0_spidev=disable,cs1_pin=17,cs1_spidev=disable",
+  "dtoverlay=mcp2515,spi6-0,oscillator=16000000,interrupt=15",
+]
+
+[components."interface.can.cm4.two"]
+rule_profiles = ["interface.can.cm4.two"]
+
+[[components."interface.can.cm4.two".config_blocks]]
+order = 35
+lines = [
+  "dtoverlay=spi6-2cs,cs0_spidev=disable,cs1_pin=17,cs1_spidev=disable",
+  "dtoverlay=mcp2515,spi6-0,oscillator=16000000,interrupt=15",
+  "dtoverlay=mcp2515,spi6-1,oscillator=16000000,interrupt=14",
+]
+
+[components."interface.can.cm5.two"]
+rule_profiles = ["interface.can.cm5.two"]
+
+[[components."interface.can.cm5.two".config_blocks]]
+order = 35
+lines = [
+  "dtoverlay=spi1-2cs,cs0_spidev=off,cs1_spidev=off",
+  "dtoverlay=mcp2515,spi1-0,oscillator=16000000,interrupt=15",
+  "dtoverlay=mcp2515,spi1-1,oscillator=16000000,interrupt=14",
+]
+
+[components."interface.uart.cm4"]
+rule_profiles = ["cm4_uart"]
+
+[components."interface.uart.cm5"]
+rule_profiles = ["cm5_uart"]
+
+[components."special.cm4sen"]
+rule_profiles = ["cm4sen"]
+
+[[components."special.cm4sen".config_blocks]]
+order = 10
+lines = [
+  "dtparam=i2c_arm=on",
+  "enable_uart=1",
+  "otg_mode=1",
+  "dtoverlay=i2c-rtc,pcf8563",
+  "dtoverlay=spi6-1cs,cs0_pin=18,cs0_spidev=disabled",
+  "dtoverlay=mcp2515,spi6-0,oscillator=16000000,interrupt=7",
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=uart5",
+  "gpio=11=op,dl",
+  "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+]
+
+# Reusable udev rule groups.
+
+[rule_profiles."cm4_uart"]
+[[rule_profiles."cm4_uart".files]]
+path = "/etc/udev/rules.d/98-com.rules"
+content = '''
+KERNEL=="ttyAMA3", PROGRAM="/bin/sh -c '\
+        echo 1\
+'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA5", PROGRAM="/bin/sh -c '\
+        echo 2\
+'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA2", PROGRAM="/bin/sh -c '\
+        echo 3\
+'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA4", PROGRAM="/bin/sh -c '\
+        echo 4\
+'", SYMLINK+="com%c"
+'''
+
+[rule_profiles."cm5_uart"]
+[[rule_profiles."cm5_uart".files]]
+path = "/etc/udev/rules.d/98-com.rules"
+content = '''
+KERNEL=="ttyAMA2", PROGRAM="/bin/sh -c '\
+        echo 1\
+'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA4", PROGRAM="/bin/sh -c '\
+        echo 2\
+'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA1", PROGRAM="/bin/sh -c '\
+        echo 3\
+'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA3", PROGRAM="/bin/sh -c '\
+        echo 4\
+'", SYMLINK+="com%c"
+'''
+
+[rule_profiles."cm4sen"]
+[[rule_profiles."cm4sen".files]]
+path = "/etc/udev/rules.d/50-local.rules"
+content = '''
+# RS232 maps to the console/serial0 UART, resolved dynamically from the
+# device tree alias serial0 by comparing UART addresses
+KERNEL=="ttyAMA[0-9]*|ttyS[0-9]*", PROGRAM="/bin/sh -c '\
+        TTYADDR=$$(readlink /sys/class/tty/%k/device | sed -e \"s|.*/||\" -e \"s|[.].*||\" -e \"s|^20|7e|\" -e \"s|^3f|7e|\" -e \"s|^fe|7e|\"); \
+        SERIAL0=$$(strings /proc/device-tree/aliases/serial0 2>/dev/null); \
+        S0ADDR=$$(echo \"$$SERIAL0\" | sed -e \"s|.*serial@||\" -e \"s|/.*||\"); \
+        [ -n \"$$SERIAL0\" ] && [ -n \"$$S0ADDR\" ] && [ \"$$TTYADDR\" = \"$$S0ADDR\" ] && echo 0 || exit 1; \
+'", SYMLINK+="rs232", GOTO="rs232_done"
+# RS485 fixed mapping of uart2~5 overlays
+KERNEL=="ttyAMA2", SYMLINK+="rs485-3"
+KERNEL=="ttyAMA3", SYMLINK+="rs485-1"
+KERNEL=="ttyAMA4", SYMLINK+="rs485-2"
+KERNEL=="ttyAMA5", SYMLINK+="rs485-4"
+LABEL="rs232_done"
+        '''
+
+[rule_profiles."interface.can.cm4.one"]
+[[rule_profiles."interface.can.cm4.one".files]]
+path = "/etc/udev/rules.d/50-can.rules"
+ubuntu_content = '''
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/soc/*spi/spi_master/spi*/spi*.0/net/can*", NAME="canb0"
+'''
+default_content = '''
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/soc/*spi/spi_master/spi6/spi6.0/net/can*", NAME="canb0"
+'''
+
+[rule_profiles."interface.can.cm4.two"]
+[[rule_profiles."interface.can.cm4.two".files]]
+path = "/etc/udev/rules.d/50-can.rules"
+ubuntu_content = '''
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/soc/*spi/spi_master/spi*/spi*.1/net/can*", NAME="canb1"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/soc/*spi/spi_master/spi*/spi*.0/net/can*", NAME="canb0"
+'''
+default_content = '''
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/soc/*spi/spi_master/spi6/spi6.1/net/can*", NAME="canb1"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/soc/*spi/spi_master/spi6/spi6.0/net/can*", NAME="canb0"
+'''
+
+[rule_profiles."interface.can.cm5.two"]
+[[rule_profiles."interface.can.cm5.two".files]]
+path = "/etc/udev/rules.d/50-can.rules"
+ubuntu_content = '''
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/axi/*.pcie/*.spi/spi_master/spi*/spi*.0/net/can*", NAME="canb0"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/axi/*.pcie/*.spi/spi_master/spi*/spi*.1/net/can*", NAME="canb1"
+'''
+default_content = '''
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/axi/*.pcie/*.spi/spi_master/spi1/spi1.0/net/can*", NAME="canb0"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/axi/*.pcie/*.spi/spi_master/spi1/spi1.1/net/can*", NAME="canb1"
+'''

@@ -1,0 +1,68 @@
+version = 1
+
+# Stable product-code dictionaries. Existing values must never be reused for
+# a different hardware identity.
+
+[platforms]
+CM0 = 1
+CM4 = 2
+PI4 = 3
+CM5 = 4
+PI5 = 5
+
+[lte]
+None = 0
+FourG = 1
+FiveG = 2
+
+[screens]
+None = 0
+H070C = 1
+H101C = 2
+M116C = 3
+M121C = 4
+M133C = 5
+M150C = 6
+M156C = 7
+M170C = 8
+M185C = 9
+M215C = 10
+
+[boards]
+PI02 = 0
+PI4 = 1
+PI5 = 2
+CM4SEN = 3
+CM4MEIDA = 4
+CM4IND = 5
+CM4NANO = 6
+CM4IO = 7
+IPC1000 = 8
+IPC1100 = 9
+IPC1200 = 10
+IPC2010 = 11
+IPC2020 = 12
+IPC2110 = 13
+IPC2120 = 14
+IPC2130 = 15
+IPC2140 = 16
+IPC2210 = 17
+IPC2220 = 18
+SBC2310 = 19
+SBC2311 = 20
+SBC2320 = 21
+SBC2321 = 22
+Plc2010Iobase = 23
+GWL2010 = 24
+GWL2110 = 25
+
+[subboards]
+None = 0
+S_8X8Y2C = 1
+S_8X8Y = 2
+S_4X4Y1C = 3
+S_EXPCOM1 = 4
+S_EXPCOM2 = 5
+S_EXPCOM3 = 6
+S_4X4Y2V2A = 7
+S_IPC3020 = 8

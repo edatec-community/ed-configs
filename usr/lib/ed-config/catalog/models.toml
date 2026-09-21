@@ -1,0 +1,365 @@
+version = 1
+
+# Exact hardware identities. Several models intentionally select the same
+# software profile while retaining distinct PRODUCT codes.
+
+[[models]]
+name = "HMI2120_070C"
+profile = "HMI2120_070C"
+platform = "CM4"
+board = "IPC2120"
+subboard = "None"
+screen = "H070C"
+
+[[models]]
+name = "HMI2120_101C"
+profile = "HMI2120_101C"
+platform = "CM4"
+board = "IPC2120"
+subboard = "None"
+screen = "H101C"
+
+[[models]]
+name = "IPC2110"
+profile = "IPC2110"
+platform = "CM4"
+board = "IPC2110"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC2120"
+profile = "IPC2110"
+platform = "CM4"
+board = "IPC2120"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC2130"
+profile = "IPC2110"
+platform = "CM4"
+board = "IPC2130"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC2140"
+profile = "IPC2110"
+platform = "CM4"
+board = "IPC2140"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "HMI2632_101C"
+profile = "HMI2630_101C"
+platform = "CM4"
+board = "IPC2110"
+subboard = "S_8X8Y2C"
+screen = "H101C"
+
+[[models]]
+name = "HMI2633_101C"
+profile = "HMI2630_101C"
+platform = "CM4"
+board = "IPC2130"
+subboard = "S_8X8Y2C"
+screen = "H101C"
+
+[[models]]
+name = "HMI2634_101C"
+profile = "HMI2630_101C"
+platform = "CM4"
+board = "IPC2140"
+subboard = "S_8X8Y2C"
+screen = "H101C"
+
+[[models]]
+name = "IPC2612"
+profile = "IPC2610"
+platform = "CM4"
+board = "IPC2110"
+subboard = "S_8X8Y"
+screen = "None"
+
+[[models]]
+name = "IPC2613"
+profile = "IPC2610"
+platform = "CM4"
+board = "IPC2130"
+subboard = "S_8X8Y"
+screen = "None"
+
+[[models]]
+name = "IPC2614"
+profile = "IPC2610"
+platform = "CM4"
+board = "IPC2140"
+subboard = "S_8X8Y"
+screen = "None"
+
+[[models]]
+name = "IPC2622"
+profile = "IPC2620"
+platform = "CM4"
+board = "IPC2110"
+subboard = "S_4X4Y1C"
+screen = "None"
+
+[[models]]
+name = "IPC2623"
+profile = "IPC2620"
+platform = "CM4"
+board = "IPC2130"
+subboard = "S_4X4Y1C"
+screen = "None"
+
+[[models]]
+name = "IPC2624"
+profile = "IPC2620"
+platform = "CM4"
+board = "IPC2140"
+subboard = "S_4X4Y1C"
+screen = "None"
+
+[[models]]
+name = "IPC2632"
+profile = "IPC2630"
+platform = "CM4"
+board = "IPC2110"
+subboard = "S_8X8Y2C"
+screen = "None"
+
+[[models]]
+name = "IPC2633"
+profile = "IPC2630"
+platform = "CM4"
+board = "IPC2130"
+subboard = "S_8X8Y2C"
+screen = "None"
+
+[[models]]
+name = "IPC2634"
+profile = "IPC2630"
+platform = "CM4"
+board = "IPC2140"
+subboard = "S_8X8Y2C"
+screen = "None"
+
+[[models]]
+name = "HMI3120_070C"
+profile = "HMI3120_070C"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "H070C"
+
+[[models]]
+name = "HMI3120_101C"
+profile = "HMI3120_101C"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "H101C"
+
+[[models]]
+name = "HMI3120_116C"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "M116C"
+
+[[models]]
+name = "HMI3120_133C"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "M133C"
+
+[[models]]
+name = "HMI3120_156C"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "M156C"
+
+[[models]]
+name = "HMI3120_185C"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "M185C"
+
+[[models]]
+name = "HMI3120_215C"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "M215C"
+
+[[models]]
+name = "IPC3110"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2110"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC3120"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2120"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC3130"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2130"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC3140"
+profile = "IPC3110"
+platform = "CM5"
+board = "IPC2140"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "HMI3632_101C"
+profile = "HMI3630_101C"
+platform = "CM5"
+board = "IPC2110"
+subboard = "S_8X8Y2C"
+screen = "H101C"
+
+[[models]]
+name = "HMI3633_101C"
+profile = "HMI3630_101C"
+platform = "CM5"
+board = "IPC2130"
+subboard = "S_8X8Y2C"
+screen = "H101C"
+
+[[models]]
+name = "HMI3634_101C"
+profile = "HMI3630_101C"
+platform = "CM5"
+board = "IPC2140"
+subboard = "S_8X8Y2C"
+screen = "H101C"
+
+[[models]]
+name = "HMI3632_116C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2110"
+subboard = "S_8X8Y2C"
+screen = "M116C"
+
+[[models]]
+name = "HMI3632_133C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2110"
+subboard = "S_8X8Y2C"
+screen = "M133C"
+
+[[models]]
+name = "HMI3632_156C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2110"
+subboard = "S_8X8Y2C"
+screen = "M156C"
+
+[[models]]
+name = "HMI3633_116C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2130"
+subboard = "S_8X8Y2C"
+screen = "M116C"
+
+[[models]]
+name = "HMI3633_133C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2130"
+subboard = "S_8X8Y2C"
+screen = "M133C"
+
+[[models]]
+name = "HMI3633_156C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2130"
+subboard = "S_8X8Y2C"
+screen = "M156C"
+
+[[models]]
+name = "HMI3634_116C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2140"
+subboard = "S_8X8Y2C"
+screen = "M116C"
+
+[[models]]
+name = "HMI3634_133C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2140"
+subboard = "S_8X8Y2C"
+screen = "M133C"
+
+[[models]]
+name = "HMI3634_156C"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2140"
+subboard = "S_8X8Y2C"
+screen = "M156C"
+
+[[models]]
+name = "IPC3632"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2110"
+subboard = "S_8X8Y2C"
+screen = "None"
+
+[[models]]
+name = "IPC3633"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2130"
+subboard = "S_8X8Y2C"
+screen = "None"
+
+[[models]]
+name = "IPC3634"
+profile = "IPC3630"
+platform = "CM5"
+board = "IPC2140"
+subboard = "S_8X8Y2C"
+screen = "None"
+
+[[models]]
+name = "CM4SEN"
+profile = "CM4SEN"
+platform = "CM4"
+board = "CM4SEN"
+subboard = "None"
+screen = "None"
+
