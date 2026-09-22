@@ -18,7 +18,7 @@ from .screen import operations as screen_operations
 
 BEGIN = "# BEGIN EDATEC MANAGED CONFIG"
 END = "# END EDATEC MANAGED CONFIG"
-UBUNTU_DISABLED = {"dtparam=i2c_vc=on", "dtparam=i2c_arm=on", "dtparam=spi=on"}
+UBUNTU_DISABLED = {"dtparam=i2c_arm=on", "dtparam=spi=on"}
 
 
 def rooted(root: Path, absolute: str) -> Path:
@@ -196,7 +196,6 @@ def build_plan(
         "schema_version": 1,
         "root": str(root),
         "os": "ubuntu" if ubuntu else "raspberrypi",
-        "profile": resolution["profile"],
         "model": resolution["model"],
         "options": resolution["options"],
         "product_code": resolution["product_code"],

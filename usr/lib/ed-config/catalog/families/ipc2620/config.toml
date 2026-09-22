@@ -1,0 +1,28 @@
+format = "ed-config-family"
+version = 1
+id = "ipc2620"
+platform = "CM4"
+disable_config_on_ubuntu = true
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "dtoverlay=ed-ipc,ipc2100,exp4x4y",
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=uart5",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+  "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+  "enable_uart=1",
+  "dtoverlay=spi6-2cs,cs0_spidev=disable,cs1_pin=17,cs1_spidev=disable",
+  "dtoverlay=mcp2515,spi6-0,oscillator=16000000,interrupt=15",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/50-can.rules"
+default_file = "50-can.rules"
+ubuntu_file = "50-can.ubuntu.rules"

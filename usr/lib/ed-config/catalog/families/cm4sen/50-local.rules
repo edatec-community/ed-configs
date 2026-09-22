@@ -1,0 +1,14 @@
+# RS232 maps to the console/serial0 UART, resolved dynamically from the
+# device tree alias serial0 by comparing UART addresses
+KERNEL=="ttyAMA[0-9]*|ttyS[0-9]*", PROGRAM="/bin/sh -c '\
+        TTYADDR=$$(readlink /sys/class/tty/%k/device | sed -e "s|.*/||" -e "s|[.].*||" -e "s|^20|7e|" -e "s|^3f|7e|" -e "s|^fe|7e|"); \
+        SERIAL0=$$(strings /proc/device-tree/aliases/serial0 2>/dev/null); \
+        S0ADDR=$$(echo "$$SERIAL0" | sed -e "s|.*serial@||" -e "s|/.*||"); \
+        [ -n "$$SERIAL0" ] && [ -n "$$S0ADDR" ] && [ "$$TTYADDR" = "$$S0ADDR" ] && echo 0 || exit 1; \
+'", SYMLINK+="rs232", GOTO="rs232_done"
+# RS485 fixed mapping of uart2~5 overlays
+KERNEL=="ttyAMA2", SYMLINK+="rs485-3"
+KERNEL=="ttyAMA3", SYMLINK+="rs485-1"
+KERNEL=="ttyAMA4", SYMLINK+="rs485-2"
+KERNEL=="ttyAMA5", SYMLINK+="rs485-4"
+LABEL="rs232_done"

@@ -1,0 +1,32 @@
+format = "ed-config-family"
+version = 1
+id = "ipc3600"
+platform = "CM5"
+disable_config_on_ubuntu = true
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "dtoverlay=ed-ipc,ipc3100,exp8x8y",
+  "dtoverlay=uart1",
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=sdio-pi5",
+  "dtparam=rtc=off",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
+  "enable_uart=1",
+  "dtoverlay=spi1-2cs,cs0_spidev=off,cs1_spidev=off",
+  "dtoverlay=mcp2515,spi1-0,oscillator=16000000,interrupt=15",
+  "dtoverlay=mcp2515,spi1-1,oscillator=16000000,interrupt=14",
+  "force_eeprom_read=0",
+  "disable_poe_fan=1",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/50-can.rules"
+default_file = "50-can.rules"
+ubuntu_file = "50-can.ubuntu.rules"

@@ -156,15 +156,18 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
             catalog = Catalog(program_dir / "catalog")
             value = {
                 "valid": True,
-                "profiles": len(catalog.profiles),
                 "models": len(catalog.models),
+                "families": len(catalog.families),
                 "options": sorted(catalog.options),
                 "digest": catalog.digest,
             }
             if arguments[1:]:
                 _json(value)
             else:
-                print(f"valid: {value['profiles']} profiles, {value['models']} models")
+                print(
+                    f"valid: {value['models']} models, "
+                    f"{value['families']} configuration families"
+                )
             return 0
         except (ConfigError, OSError) as exc:
             print(f"ed-config: {exc}", file=sys.stderr)
@@ -195,7 +198,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
             else:
                 _print_status(value)
         elif args.command == "version":
-            value = {"version": __version__, "catalog_schema_version": 1}
+            value = {"version": __version__, "catalog_schema_version": 3}
             if args.json:
                 _json(value)
             else:

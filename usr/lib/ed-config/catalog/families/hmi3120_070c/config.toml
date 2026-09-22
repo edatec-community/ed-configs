@@ -1,0 +1,23 @@
+format = "ed-config-family"
+version = 1
+id = "hmi3120_070c"
+platform = "CM5"
+disable_config_on_ubuntu = true
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "dtoverlay=vc4-kms-dsi-edatec-panel-070c,i2c4,interrupt=7",
+  "dtoverlay=ed-ipc,ipc3100",
+  "dtoverlay=uart1",
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=sdio-pi5",
+  "dtparam=rtc=off",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
+  "enable_uart=1",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"

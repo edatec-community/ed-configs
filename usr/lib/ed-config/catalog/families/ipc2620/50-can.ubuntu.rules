@@ -1,0 +1,1 @@
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/soc/*spi/spi_master/spi*/spi*.0/net/can*", NAME="canb0"

@@ -1,0 +1,22 @@
+format = "ed-config-family"
+version = 1
+id = "ipc3100"
+platform = "CM5"
+disable_config_on_ubuntu = true
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "dtoverlay=ed-ipc,ipc3100",
+  "dtoverlay=uart1",
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=sdio-pi5",
+  "dtparam=rtc=off",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
+  "enable_uart=1",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"

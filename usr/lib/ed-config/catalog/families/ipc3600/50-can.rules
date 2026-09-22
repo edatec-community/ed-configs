@@ -1,0 +1,2 @@
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/axi/*.pcie/*.spi/spi_master/spi1/spi1.0/net/can*", NAME="canb0"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", DEVPATH=="/devices/platform/axi/*.pcie/*.spi/spi_master/spi1/spi1.1/net/can*", NAME="canb1"

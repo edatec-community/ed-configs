@@ -1,0 +1,23 @@
+format = "ed-config-family"
+version = 1
+id = "cm4sen"
+platform = "CM4"
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "enable_uart=1",
+  "otg_mode=1",
+  "dtoverlay=i2c-rtc,pcf8563",
+  "dtoverlay=spi6-1cs,cs0_pin=18,cs0_spidev=disabled",
+  "dtoverlay=mcp2515,spi6-0,oscillator=16000000,interrupt=7",
+  "dtoverlay=uart2",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=uart5",
+  "gpio=11=op,dl",
+  "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/50-local.rules"
+content_file = "50-local.rules"
