@@ -362,3 +362,51 @@ platform = "CM4"
 board = "CM4SEN"
 subboard = "None"
 screen = "None"
+
+[[models]]
+name = "CM4IND"
+config = "cm4ind"
+platform = "CM4"
+board = "CM4IND"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "HMI3010_070C"
+config = "hmi3010_070c"
+platform = "PI5"
+board = "PI5"
+subboard = "None"
+screen = "H070C"
+
+[[models]]
+name = "HMI3010_101C"
+config = "hmi3010_101c"
+platform = "PI5"
+board = "PI5"
+subboard = "None"
+screen = "H101C"
+
+[[models]]
+name = "IPC3020"
+config = "ipc3020"
+platform = "PI5"
+board = "PI5"
+subboard = "S_IPC3020"
+screen = "None"
+
+[[models]]
+name = "HMI3020_070C"
+config = "hmi3020_070c"
+platform = "PI5"
+board = "PI5"
+subboard = "S_IPC3020"
+screen = "H070C"
+
+[[models]]
+name = "HMI3020_101C"
+config = "hmi3020_101c"
+platform = "PI5"
+board = "PI5"
+subboard = "S_IPC3020"
+screen = "H101C"

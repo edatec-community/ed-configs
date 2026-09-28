@@ -1,0 +1,7 @@
+KERNEL=="ttyAMA2", PROGRAM="/bin/sh -c '\
+        echo 1\
+'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA4", PROGRAM="/bin/sh -c '\
+        echo 2\
+'", SYMLINK+="com%c"

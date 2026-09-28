@@ -1,0 +1,24 @@
+format = "ed-config-family"
+version = 1
+id = "cm4ind"
+platform = "CM4"
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "dtparam=spi=on",
+  "dtoverlay=spi1-1cs,cs0_pin=16,cs0_spidev=off",
+  "dtoverlay=jedec-spi-nor,spi1-0",
+  "dtoverlay=i2c-rtc,pcf8563",
+  "dtoverlay=ads1015,cha_gain=1,chb_gain=1,chc_gain=1,chd_gain=1",
+  "gpio=7=ip,pu",
+  "dtoverlay=uart3",
+  "dtoverlay=uart4",
+  "dtoverlay=uart5",
+  "otg_mode=1",
+  "gpio=6=ip,pu",
+  "gpio=25=op,dl",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/50-local.rules"
+content_file = "50-local.rules"

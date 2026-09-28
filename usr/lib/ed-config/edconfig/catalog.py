@@ -40,6 +40,11 @@ class Catalog:
         "udev_rules",
         "disable_config_on_ubuntu",
         "desktop_config",
+        "wireplumber_audio_format",
+        "wireplumber_modern_file",
+        "alsa_config_file",
+        "alsa_state_file",
+        "audio_packages",
     }
     _RULE_FIELDS = {"path", "content_file", "default_file", "ubuntu_file"}
 
@@ -234,7 +239,7 @@ class Catalog:
             raise ConfigError(f"family package {family_id} must select one platform")
         self._code_value("platforms", platform)
         lines = family.get("config_lines")
-        if not isinstance(lines, list) or not lines or not all(
+        if not isinstance(lines, list) or not all(
             isinstance(line, str) and line.strip() and "\n" not in line for line in lines
         ):
             raise ConfigError(f"family package {family_id} has invalid config_lines")
@@ -247,6 +252,39 @@ class Catalog:
         desktop = family.get("desktop_config")
         if desktop is not None and not isinstance(desktop, str):
             raise ConfigError(f"family package {family_id} has invalid desktop_config")
+        if "wireplumber_audio_format" in family:
+            if family["wireplumber_audio_format"] != "S16LE":
+                raise ConfigError(
+                    f"family package {family_id} wireplumber_audio_format must be S16LE"
+                )
+        for field in ("alsa_config_file", "alsa_state_file"):
+            if field in family:
+                self._rule_file(
+                    self.family_directories[family_id.casefold()],
+                    family[field],
+                    f"family package {family_id} {field}",
+                )
+        if "wireplumber_modern_file" in family:
+            self._rule_file(
+                self.family_directories[family_id.casefold()],
+                family["wireplumber_modern_file"],
+                f"family package {family_id} wireplumber_modern_file",
+            )
+        if "audio_packages" in family:
+            packages = family["audio_packages"]
+            if not isinstance(packages, list) or not packages or not all(
+                isinstance(item, str) and item and not Path(item).is_absolute()
+                for item in packages
+            ):
+                raise ConfigError(
+                    f"family package {family_id} audio_packages must be non-empty relative paths"
+                )
+            for package in packages:
+                self._rule_file(
+                    self.family_directories[family_id.casefold()],
+                    package,
+                    f"family package {family_id} audio package",
+                )
         rules = family.get("udev_rules", [])
         if not isinstance(rules, list):
             raise ConfigError(f"family package {family_id} udev_rules must be an array")
@@ -457,7 +495,7 @@ class Catalog:
             for index, value in enumerate(family["config_lines"])
         ]
         values = {item["value"] for item in lines}
-        next_order = max(item["order"] for item in lines) + 10
+        next_order = max((item["order"] for item in lines), default=0) + 10
         for name in options:
             option = self.options[name]
             option_lines = list(option.get("config_lines", []))
@@ -475,6 +513,27 @@ class Catalog:
             for rule in family.get("udev_rules", [])
         ]
         rules.sort(key=lambda rule: str(rule["path"]))
+        package_dir = self.family_directories[family_id.casefold()]
+
+        def family_text(field: str) -> str | None:
+            raw = family.get(field)
+            if raw is None:
+                return None
+            try:
+                return (package_dir / str(raw)).read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ConfigError(f"cannot read {field} for family {family_id}: {exc}") from exc
+
+        def family_path_list(field: str) -> list[str]:
+            values = family.get(field, [])
+            result: list[str] = []
+            for raw in values:
+                path = self._rule_file(
+                    package_dir, raw, f"family package {family_id} {field}"
+                )
+                result.append(str(path))
+            return result
+
         return {
             "format": "ed-config-resolution",
             "schema_version": 3,
@@ -490,6 +549,11 @@ class Catalog:
                 family.get("disable_config_on_ubuntu", False)
             ),
             "screen_config": family.get("desktop_config"),
+            "wireplumber_audio_format": family.get("wireplumber_audio_format"),
+            "wireplumber_modern": family_text("wireplumber_modern_file"),
+            "alsa_config": family_text("alsa_config_file"),
+            "alsa_state": family_text("alsa_state_file"),
+            "audio_packages": family_path_list("audio_packages"),
             "config_lines": lines,
             "rules": rules,
         }
@@ -518,6 +582,12 @@ class Catalog:
             for family in self.families.values()
             for rule in family.get("udev_rules", [])
         }
+
+    def has_wireplumber_config(self) -> bool:
+        return any("wireplumber_audio_format" in family for family in self.families.values())
+
+    def has_alsa_config(self) -> bool:
+        return any("alsa_config_file" in family for family in self.families.values())
 
     def model_summary(self) -> list[dict[str, Any]]:
         return [

@@ -8,6 +8,7 @@ config_lines = ["dtparam=ant2"]
 code_bit = 29
 cm4_config_lines = ["dtoverlay=imx219"]
 cm5_config_lines = ["dtoverlay=imx219,cam0"]
+pi5_config_lines = ["dtoverlay=imx219,cam0"]
 
 [options.supercapacitor]
 code_bit = 6
@@ -23,4 +24,3 @@ code_shift = 4
 code_width = 2
 code_value = 2
 exclusive_group = "lte"
-

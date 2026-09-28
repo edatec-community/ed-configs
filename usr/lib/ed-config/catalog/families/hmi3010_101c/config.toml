@@ -1,0 +1,9 @@
+format = "ed-config-family"
+version = 1
+id = "hmi3010_101c"
+platform = "PI5"
+desktop_config = "h101c"
+
+config_lines = [
+  "dtoverlay=vc4-kms-dsi-edatec-panel-101c,interrupt=2",
+]
