@@ -26,9 +26,13 @@ WIREPLUMBER_CONFIG = "/etc/wireplumber/main.lua.d/50-alsa-config.lua"
 WIREPLUMBER_MODERN_CONFIG = "/etc/wireplumber/wireplumber.conf.d/51-ed-config-rt5616.conf"
 ASOUND_CONFIG = "/etc/asound.conf"
 ALSA_STATE = "/var/lib/alsa/asound.state"
+ALSA_PROFILE_SET_DIR = "/etc/alsa-card-profile/mixer/profile-sets"
+ALSA_PROFILE_PATH_DIR = "/etc/alsa-card-profile/mixer/paths"
 DPKG = "/usr/bin/dpkg"
 DPKG_DEB = "/usr/bin/dpkg-deb"
 DPKG_QUERY = "/usr/bin/dpkg-query"
+ALSACTL = "/usr/sbin/alsactl"
+_ALSA_STATE_HEADER = re.compile(r"^state\.([^\s{]+)\s*\{\s*$")
 
 
 def rooted(root: Path, absolute: str) -> Path:
@@ -94,8 +98,8 @@ def _without_managed_block(lines: list[str]) -> list[str]:
 
 def _config_content(current: str | None, desired: list[str], known: set[str]) -> str:
     lines = _without_managed_block((current or "").splitlines())
-    # Migrate exact lines written by older ed-tools/ed-config versions into the
-    # managed block, while retaining all unrelated customer configuration.
+    # Remove exact lines previously managed by this catalog before rebuilding
+    # the managed block, while retaining all unrelated customer configuration.
     lines = [line for line in lines if line not in known]
     while lines and not lines[-1].strip():
         lines.pop()
@@ -141,6 +145,167 @@ def _catalog_asset_contents(catalog: Catalog, field: str) -> set[str]:
         except OSError as exc:
             raise ConfigError(f"cannot read {field} for family {family_id}: {exc}") from exc
     return contents
+
+
+def _catalog_named_asset_contents(
+    catalog: Catalog, field: str, multiple: bool = False
+) -> dict[str, set[str]]:
+    contents: dict[str, set[str]] = {}
+    for family_id, family in catalog.families.items():
+        raw_values = family.get(field, []) if multiple else [family.get(field)]
+        for raw in raw_values:
+            if not isinstance(raw, str):
+                continue
+            path = catalog.family_directories[family_id.casefold()] / raw
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ConfigError(f"cannot read {field} for family {family_id}: {exc}") from exc
+            contents.setdefault(Path(raw).name, set()).add(content)
+    return contents
+
+
+def _alsa_brace_delta(line: str) -> int:
+    """Count ALSA state braces outside quoted strings and comments."""
+    delta = 0
+    quote: str | None = None
+    escaped = False
+    for character in line:
+        if escaped:
+            escaped = False
+            continue
+        if quote is not None:
+            if character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            continue
+        if character in {"'", '"'}:
+            quote = character
+        elif character == "#":
+            break
+        elif character == "{":
+            delta += 1
+        elif character == "}":
+            delta -= 1
+    return delta
+
+
+def _alsa_state_blocks(content: str) -> dict[str, tuple[int, int]]:
+    """Return top-level ALSA state block spans keyed by card name."""
+    blocks: dict[str, tuple[int, int]] = {}
+    active_name: str | None = None
+    active_start = 0
+    depth = 0
+    offset = 0
+
+    for line in content.splitlines(keepends=True):
+        if active_name is None:
+            match = _ALSA_STATE_HEADER.match(line.rstrip("\r\n"))
+            if match is None:
+                offset += len(line)
+                continue
+            active_name = match.group(1)
+            active_start = offset
+            depth = 0
+
+        depth += _alsa_brace_delta(line)
+        if depth < 0:
+            raise ConfigError("malformed ALSA state: unmatched closing brace")
+        if depth == 0:
+            if active_name in blocks:
+                raise ConfigError(f"malformed ALSA state: duplicate state.{active_name} block")
+            blocks[active_name] = (active_start, offset + len(line))
+            active_name = None
+        offset += len(line)
+
+    if active_name is not None:
+        raise ConfigError(f"malformed ALSA state: unterminated state.{active_name} block")
+    return blocks
+
+
+def _alsa_state_block_names(contents: set[str]) -> set[str]:
+    names: set[str] = set()
+    for content in contents:
+        names.update(_alsa_state_blocks(content))
+    return names
+
+
+def _merge_alsa_state(
+    current: str | None,
+    desired: str,
+    selected_names: set[str] | None = None,
+    managed_names: set[str] | None = None,
+) -> str:
+    """Replace selected codec blocks while preserving unrelated card state."""
+    desired_blocks = _alsa_state_blocks(desired)
+    if not desired_blocks:
+        raise ConfigError("ALSA state asset contains no state blocks")
+    selected = set(desired_blocks) if selected_names is None else set(selected_names)
+    missing = selected - set(desired_blocks)
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise ConfigError(f"ALSA state asset is missing selected block(s): {names}")
+    managed = set(managed_names or ())
+
+    def selected_content() -> str:
+        content = "\n\n".join(
+            desired[desired_blocks[name][0]:desired_blocks[name][1]].rstrip("\r\n")
+            for name in desired_blocks
+            if name in selected
+        )
+        return content + "\n" if content else ""
+
+    if current is None or not current.strip():
+        return selected_content()
+
+    current_blocks = _alsa_state_blocks(current)
+    if not current_blocks:
+        raise ApplyError("cannot merge ALSA state: current file contains no state blocks")
+
+    output: list[str] = []
+    cursor = 0
+    for name, (start, end) in sorted(current_blocks.items(), key=lambda item: item[1][0]):
+        output.append(current[cursor:start])
+        desired_span = desired_blocks.get(name)
+        if name in selected and desired_span is not None:
+            output.append(desired[desired_span[0]:desired_span[1]])
+        elif name in managed and name not in selected:
+            pass
+        else:
+            output.append(current[start:end])
+        cursor = end
+    output.append(current[cursor:])
+    merged = "".join(output)
+
+    missing = [
+        name for name, (start, _end) in desired_blocks.items()
+        if name in selected and name not in current_blocks
+    ]
+    if missing:
+        appended = "\n\n".join(
+            desired[desired_blocks[name][0]:desired_blocks[name][1]].rstrip("\r\n")
+            for name in missing
+        )
+        merged = merged.rstrip("\r\n") + "\n\n" + appended + "\n"
+    return merged
+
+
+def _remove_alsa_state_blocks(current: str, names: set[str]) -> str:
+    """Remove only blocks owned by ed-config from a global ALSA state file."""
+    current_blocks = _alsa_state_blocks(current)
+    if not current_blocks:
+        return current
+
+    output: list[str] = []
+    cursor = 0
+    for name, (start, end) in sorted(current_blocks.items(), key=lambda item: item[1][0]):
+        output.append(current[cursor:start])
+        if name not in names:
+            output.append(current[start:end])
+        cursor = end
+    output.append(current[cursor:])
+    return "".join(output)
 
 
 def _catalog_field_values(catalog: Catalog, field: str) -> set[str]:
@@ -273,6 +438,43 @@ def _install_local_packages(paths: list[str]) -> None:
             "local audio package installation failed; no network dependency repair was attempted"
             + (f": {detail}" if detail else "")
         ) from exc
+
+
+def _restore_alsa_state() -> None:
+    command = [
+        ALSACTL,
+        "-E",
+        "HOME=/run/alsa",
+        "-E",
+        "XDG_RUNTIME_DIR=/run/alsa/runtime",
+        "restore",
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except OSError:
+        raise
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        raise OSError(detail or "alsactl restore failed") from exc
+
+
+def _alsa_state_card_present(root: Path, names: set[str]) -> bool:
+    """Check whether one of the managed ALSA cards is currently enumerated."""
+    if not names:
+        return False
+    proc_asound = root / "proc/asound"
+    try:
+        card_ids = {
+            re.sub(r"[^a-z0-9]", "", path.read_text(encoding="utf-8").strip().casefold())
+            for path in proc_asound.glob("card*/id")
+        }
+    except OSError:
+        return False
+    wanted = {
+        re.sub(r"[^a-z0-9]", "", name.casefold())
+        for name in names
+    }
+    return bool(card_ids & wanted)
 
 
 def build_plan(
@@ -416,6 +618,7 @@ def build_plan(
         # The old postrm did not remove this copied WirePlumber file when the
         # package was removed or another model was selected.
 
+    alsa_restore_needed = False
     if catalog.has_alsa_config():
         asound_target = rooted(root, ASOUND_CONFIG)
         asound_content = resolution.get("alsa_config")
@@ -438,19 +641,134 @@ def build_plan(
         state_target = rooted(root, ALSA_STATE)
         state_content = resolution.get("alsa_state")
         managed_state = _catalog_asset_contents(catalog, "alsa_state_file")
+        managed_names = {
+            str(block)
+            for family in catalog.families.values()
+            for block in family.get("alsa_state_blocks", [])
+        }
+        if not managed_names:
+            # Backward compatibility for catalogs created before explicit
+            # alsa_state_blocks metadata was introduced.
+            managed_names = _alsa_state_block_names(managed_state)
         current_state = _read(state_target)
         if state_content:
-            if current_state is None or current_state in managed_state:
-                write_operation("alsa", state_target, str(state_content), 0o644)
-        elif current_state in managed_state:
+            selected_names = {
+                str(block) for block in resolution.get("alsa_state_blocks", [])
+            } or None
+            merged_state = _merge_alsa_state(
+                current_state,
+                str(state_content),
+                selected_names,
+                managed_names,
+            )
+            if current_state != merged_state:
+                write_operation("alsa", state_target, merged_state, 0o644)
+                alsa_restore_needed = True
+        elif current_state is not None:
+            remaining_state = _remove_alsa_state_blocks(current_state, managed_names)
+            if remaining_state != current_state:
+                if remaining_state.strip():
+                    write_operation("alsa", state_target, remaining_state, 0o644)
+                else:
+                    operations.append({
+                        "kind": "alsa",
+                        "action": "delete",
+                        "path": ALSA_STATE,
+                        "changed": True,
+                        "_target": state_target,
+                        "_original": current_state,
+                    })
+                alsa_restore_needed = True
+
+    managed_profile_sets = _catalog_named_asset_contents(
+        catalog, "alsa_profile_set_file"
+    )
+    managed_profile_paths = _catalog_named_asset_contents(
+        catalog, "alsa_profile_path_files", multiple=True
+    )
+    selected_profile_set_file = resolution.get("alsa_profile_set_file")
+    selected_profile_set_name = (
+        Path(str(selected_profile_set_file)).name
+        if selected_profile_set_file
+        else None
+    )
+    selected_profile_set = resolution.get("alsa_profile_set")
+    if selected_profile_set_name and isinstance(selected_profile_set, str):
+        profile_target = rooted(
+            root, f"{ALSA_PROFILE_SET_DIR}/{selected_profile_set_name}"
+        )
+        current_profile = _read(profile_target)
+        if current_profile is None or current_profile in managed_profile_sets.get(
+            selected_profile_set_name, set()
+        ):
+            write_operation("alsa_profile", profile_target, selected_profile_set, 0o644)
+    for name, managed in managed_profile_sets.items():
+        if name == selected_profile_set_name:
+            continue
+        profile_target = rooted(root, f"{ALSA_PROFILE_SET_DIR}/{name}")
+        if _read(profile_target) in managed:
             operations.append({
-                "kind": "alsa",
+                "kind": "alsa_profile",
                 "action": "delete",
-                "path": ALSA_STATE,
+                "path": f"{ALSA_PROFILE_SET_DIR}/{name}",
                 "changed": True,
-                "_target": state_target,
-                "_original": _read(state_target),
+                "_target": profile_target,
+                "_original": _read(profile_target),
             })
+
+    selected_profile_path_names: set[str] = set()
+    for profile_path in resolution.get("alsa_profile_path_files", []):
+        if not isinstance(profile_path, dict):
+            continue
+        name = Path(str(profile_path.get("name", ""))).name
+        content = profile_path.get("content")
+        if not name or not isinstance(content, str):
+            continue
+        selected_profile_path_names.add(name)
+        path_target = rooted(root, f"{ALSA_PROFILE_PATH_DIR}/{name}")
+        current_path = _read(path_target)
+        if current_path is None or current_path in managed_profile_paths.get(name, set()):
+            write_operation("alsa_profile", path_target, content, 0o644)
+    for name, managed in managed_profile_paths.items():
+        if name in selected_profile_path_names:
+            continue
+        path_target = rooted(root, f"{ALSA_PROFILE_PATH_DIR}/{name}")
+        if _read(path_target) in managed:
+            operations.append({
+                "kind": "alsa_profile",
+                "action": "delete",
+                "path": f"{ALSA_PROFILE_PATH_DIR}/{name}",
+                "changed": True,
+                "_target": path_target,
+                "_original": _read(path_target),
+            })
+
+    config_changed = any(
+        operation["changed"] and operation["kind"] == "config"
+        for operation in operations
+    )
+    selected_alsa_blocks = {
+        str(block) for block in resolution.get("alsa_state_blocks", [])
+    }
+    # A newly written config.txt cannot enable the codec until the next boot.
+    # Do not run alsactl against a state file whose managed card is not yet
+    # enumerated; the state file is already staged for alsa-restore.service.
+    alsa_card_ready = _alsa_state_card_present(root, selected_alsa_blocks)
+    if (
+        alsa_restore_needed
+        and root == Path("/")
+        and not config_changed
+        and alsa_card_ready
+        and Path(ALSACTL).is_file()
+        and (root / "dev/snd").is_dir()
+    ):
+        operations.append({
+            "kind": "alsa_restore",
+            "action": "restore",
+            "path": ALSA_STATE,
+            "changed": True,
+            "_target": None,
+        })
 
     for operation in screen_operations(
         root, resolution["identity"]["platform"], resolution.get("screen_config")
@@ -477,7 +795,7 @@ def build_plan(
         "product_code": resolution["product_code"],
         "reboot_required": any(
             op["changed"] and op["kind"] in {
-                "config", "udev", "wireplumber", "alsa_profile", "alsa_config", "alsa"
+                "config", "udev", "wireplumber", "alsa_profile", "alsa_config", "alsa",
             }
             for op in operations
         ),
@@ -552,7 +870,12 @@ def _lock(root: Path) -> Iterator[None]:
 def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
     changed = [
         op for op in operations
-        if op["changed"] and op["kind"] != "packages" and op["_target"].exists()
+        if (
+            op["changed"]
+            and op["kind"] != "packages"
+            and op.get("_target") is not None
+            and op["_target"].exists()
+        )
     ]
     if not changed:
         return None
@@ -582,6 +905,10 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     _install_local_packages(operation["_packages"])
                     completed.append(operation)
                     continue
+                if operation["kind"] == "alsa_restore":
+                    _restore_alsa_state()
+                    completed.append(operation)
+                    continue
                 target: Path = operation["_target"]
                 if operation["action"] == "delete":
                     target.unlink(missing_ok=True)
@@ -597,7 +924,7 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
         except OSError as exc:
             rollback_errors: list[str] = []
             for applied in reversed(completed):
-                if applied["kind"] == "packages":
+                if applied["kind"] == "packages" or applied.get("_target") is None:
                     continue
                 target = applied["_target"]
                 original = applied.get("_original")
@@ -652,7 +979,11 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
             "options": plan["options"],
             "product_code": plan["product_code"],
             "product_code_hex": f"0x{plan['product_code']:08x}",
-            "changed_files": [op["path"] for op in plan["operations"] if op["changed"]],
+            "changed_files": [
+                op["path"]
+                for op in plan["operations"]
+                if op["changed"] and op["kind"] != "alsa_restore"
+            ],
             "reboot_required": plan["reboot_required"],
         }
 

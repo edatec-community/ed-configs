@@ -372,6 +372,30 @@ subboard = "None"
 screen = "None"
 
 [[models]]
+name = "CM4NANO"
+config = "cm4nano"
+platform = "CM4"
+board = "CM4NANO"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "CM4MEDIA"
+config = "cm4media"
+platform = "CM4"
+board = "CM4MEDIA"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "CM5MEDIA"
+config = "cm5media"
+platform = "CM5"
+board = "CM4MEDIA"
+subboard = "None"
+screen = "None"
+
+[[models]]
 name = "HMI3010_070C"
 config = "hmi3010_070c"
 platform = "PI5"
@@ -426,3 +450,35 @@ platform = "PI5"
 board = "PI5"
 subboard = "S_IPC3020"
 screen = "H101C"
+
+[[models]]
+name = "HMI2020_070C"
+config = "hmi2020_070c"
+platform = "CM4"
+board = "IPC2010"
+subboard = "None"
+screen = "H070C"
+
+[[models]]
+name = "HMI2020_101C"
+config = "hmi2020_101c"
+platform = "CM4"
+board = "IPC2010"
+subboard = "None"
+screen = "H101C"
+
+[[models]]
+name = "IPC2010"
+config = "ipc2010"
+platform = "CM4"
+board = "IPC2010"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "PLC2010"
+config = "plc2010"
+platform = "CM4"
+board = "Plc2010Iobase"
+subboard = "None"
+screen = "None"

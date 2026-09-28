@@ -1,0 +1,19 @@
+format = "ed-config-family"
+version = 1
+id = "plc2010"
+platform = "CM4"
+
+config_lines = [
+    "dtparam=i2c_vc=on",
+    "dtoverlay=uart2",
+    "dtoverlay=uart3",
+    "dtoverlay=uart4",
+    "dtoverlay=uart5",
+    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+    "dtoverlay=ed-ipc,plc2010",
+    "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/99-com.rules"
+default_file = "99-com.rules"

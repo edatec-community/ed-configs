@@ -44,6 +44,9 @@ class Catalog:
         "wireplumber_modern_file",
         "alsa_config_file",
         "alsa_state_file",
+        "alsa_state_blocks",
+        "alsa_profile_set_file",
+        "alsa_profile_path_files",
         "audio_packages",
     }
     _RULE_FIELDS = {"path", "content_file", "default_file", "ubuntu_file"}
@@ -74,7 +77,6 @@ class Catalog:
         self.models = _entries(models, "models", self.models_path)
         self.options = self._table(options, "options", self.options_path)
         self.families = self._load_families()
-        self.legacy_config_lines = self.manifest.get("legacy_config_lines", [])
         self.model_index = self._entry_index(self.models, "name", "model")
         self.family_index = {
             family_id.casefold(): (family_id, family)
@@ -168,11 +170,6 @@ class Catalog:
 
     def _validate(self) -> None:
         self._validate_code_tables()
-        if not isinstance(self.legacy_config_lines, list) or not all(
-            isinstance(line, str) and line.strip() and "\n" not in line
-            for line in self.legacy_config_lines
-        ):
-            raise ConfigError("catalog legacy_config_lines is invalid")
         for family_id, family in self.families.items():
             self._validate_family(family_id, family)
         self._validate_options()
@@ -263,6 +260,49 @@ class Catalog:
                     self.family_directories[family_id.casefold()],
                     family[field],
                     f"family package {family_id} {field}",
+                )
+        if "alsa_state_blocks" in family:
+            blocks = family["alsa_state_blocks"]
+            valid_blocks = isinstance(blocks, list) and bool(blocks) and all(
+                isinstance(block, str)
+                and block
+                and not any(character.isspace() for character in block)
+                and "{" not in block
+                and "}" not in block
+                for block in blocks
+            )
+            if not valid_blocks or len(set(blocks)) != len(blocks):
+                raise ConfigError(
+                    f"family package {family_id} has invalid alsa_state_blocks"
+                )
+        if "alsa_state_blocks" in family and "alsa_state_file" not in family:
+            raise ConfigError(
+                f"family package {family_id} has alsa_state_blocks without alsa_state_file"
+            )
+        if "alsa_profile_set_file" in family:
+            self._rule_file(
+                self.family_directories[family_id.casefold()],
+                family["alsa_profile_set_file"],
+                f"family package {family_id} alsa_profile_set_file",
+            )
+        if "alsa_profile_path_files" in family:
+            paths = family["alsa_profile_path_files"]
+            if not isinstance(paths, list) or not paths or not all(
+                isinstance(item, str) and item and not Path(item).is_absolute()
+                for item in paths
+            ):
+                raise ConfigError(
+                    f"family package {family_id} alsa_profile_path_files must be non-empty relative paths"
+                )
+            if "alsa_profile_set_file" not in family:
+                raise ConfigError(
+                    f"family package {family_id} has alsa_profile_path_files without alsa_profile_set_file"
+                )
+            for path in paths:
+                self._rule_file(
+                    self.family_directories[family_id.casefold()],
+                    path,
+                    f"family package {family_id} alsa_profile_path_files",
                 )
         if "wireplumber_modern_file" in family:
             self._rule_file(
@@ -559,6 +599,22 @@ class Catalog:
             "wireplumber_modern": family_text("wireplumber_modern_file"),
             "alsa_config": family_text("alsa_config_file"),
             "alsa_state": family_text("alsa_state_file"),
+            "alsa_state_blocks": [
+                str(block) for block in family.get("alsa_state_blocks", [])
+            ],
+            "alsa_profile_set_file": (
+                str(family["alsa_profile_set_file"])
+                if "alsa_profile_set_file" in family
+                else None
+            ),
+            "alsa_profile_set": family_text("alsa_profile_set_file"),
+            "alsa_profile_path_files": [
+                {
+                    "name": Path(str(path)).name,
+                    "content": (package_dir / str(path)).read_text(encoding="utf-8"),
+                }
+                for path in family.get("alsa_profile_path_files", [])
+            ],
             "audio_packages": family_path_list("audio_packages"),
             "config_lines": lines,
             "rules": rules,
@@ -574,7 +630,7 @@ class Catalog:
         return self.resolve(str(model["name"]), option_names)
 
     def known_config_lines(self) -> set[str]:
-        result = {str(line) for line in self.legacy_config_lines}
+        result: set[str] = set()
         for family in self.families.values():
             result.update(str(line) for line in family.get("config_lines", []))
         for option in self.options.values():
@@ -596,7 +652,11 @@ class Catalog:
         }
 
     def has_wireplumber_config(self) -> bool:
-        return any("wireplumber_audio_format" in family for family in self.families.values())
+        return any(
+            "wireplumber_audio_format" in family
+            or "wireplumber_modern_file" in family
+            for family in self.families.values()
+        )
 
     def has_alsa_config(self) -> bool:
         return any("alsa_config_file" in family for family in self.families.values())

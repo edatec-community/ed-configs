@@ -1,0 +1,19 @@
+format = "ed-config-family"
+version = 1
+id = "cm4media"
+platform = "CM4"
+disable_config_on_ubuntu = true
+wireplumber_audio_format = "S16LE"
+wireplumber_modern_file = "audio/wm8960/51-ed-config-wm8960.conf"
+alsa_profile_set_file = "audio/wm8960/ed-wm8960.conf"
+alsa_profile_path_files = ["audio/wm8960/ed-wm8960-output-speaker.conf"]
+alsa_config_file = "audio/wm8960/asound.conf"
+alsa_state_file = "audio/wm8960/asound.state"
+alsa_state_blocks = ["wm8960soundcard"]
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "gpio=15=op,dh",
+  "dtoverlay=wm8960-soundcard,media",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+]
