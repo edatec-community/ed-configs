@@ -362,7 +362,13 @@ class Catalog:
                 width, value = int(option["code_width"]), int(option["code_value"])
                 if width <= 0 or value < 0 or value >= (1 << width):
                     raise ConfigError(f"option {name} has an invalid code field")
-            for key in ("config_lines", "cm4_config_lines", "cm5_config_lines"):
+            for key in (
+                "config_lines",
+                "cm4_config_lines",
+                "pi4_config_lines",
+                "cm5_config_lines",
+                "pi5_config_lines",
+            ):
                 lines = option.get(key, [])
                 if not isinstance(lines, list) or not all(
                     isinstance(line, str) and line.strip() and "\n" not in line
@@ -572,7 +578,13 @@ class Catalog:
         for family in self.families.values():
             result.update(str(line) for line in family.get("config_lines", []))
         for option in self.options.values():
-            for key in ("config_lines", "cm4_config_lines", "cm5_config_lines"):
+            for key in (
+                "config_lines",
+                "cm4_config_lines",
+                "pi4_config_lines",
+                "cm5_config_lines",
+                "pi5_config_lines",
+            ):
                 result.update(str(line) for line in option.get(key, []))
         return result
 

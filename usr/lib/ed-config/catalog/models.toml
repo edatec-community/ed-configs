@@ -388,6 +388,22 @@ subboard = "None"
 screen = "H101C"
 
 [[models]]
+name = "HMI2002_070C"
+config = "hmi2002_070c"
+platform = "PI4"
+board = "PI4"
+subboard = "None"
+screen = "H070C"
+
+[[models]]
+name = "HMI2002_101C"
+config = "hmi2002_101c"
+platform = "PI4"
+board = "PI4"
+subboard = "None"
+screen = "H101C"
+
+[[models]]
 name = "IPC3020"
 config = "ipc3020"
 platform = "PI5"

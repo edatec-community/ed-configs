@@ -1,0 +1,8 @@
+format = "ed-config-family"
+version = 1
+id = "hmi2002_070c"
+platform = "PI4"
+
+config_lines = [
+  "dtoverlay=vc4-kms-dsi-edatec-panel-070c,interrupt=2",
+]

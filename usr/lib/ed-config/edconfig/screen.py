@@ -290,7 +290,7 @@ def operations(root: Path, platform: str, profile: str | None) -> list[dict[str,
     if profile not in {None, "h101c", "hmi3020_070c", "hmi3020_101c", "ipc3020"}:
         raise ApplyError(f"unsupported desktop configuration profile: {profile}")
     has_screen = profile not in {None, "ipc3020"}
-    dsi = "DSI-1" if platform.casefold() == "cm4" else "DSI-2"
+    dsi = "DSI-1" if platform.casefold() in {"cm4", "pi4"} else "DSI-2"
     if profile == "hmi3020_070c":
         wayfire_touches = [
             "generic ft5x06 (79)",

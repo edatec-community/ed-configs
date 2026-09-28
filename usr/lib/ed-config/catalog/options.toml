@@ -7,6 +7,7 @@ config_lines = ["dtparam=ant2"]
 [options.camera]
 code_bit = 29
 cm4_config_lines = ["dtoverlay=imx219"]
+pi4_config_lines = ["dtoverlay=imx219"]
 cm5_config_lines = ["dtoverlay=imx219,cam0"]
 pi5_config_lines = ["dtoverlay=imx219,cam0"]
 
