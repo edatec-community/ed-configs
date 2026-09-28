@@ -1,0 +1,12 @@
+format = "ed-config-family"
+version = 1
+id = "hmi2020_101c"
+platform = "CM4"
+desktop_config = "h101c"
+
+config_lines = [
+    "dtoverlay=vc4-kms-dsi-edatec-panel-101c,interrupt=16",
+    "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+    "dtparam=i2c_vc=on",
+]
