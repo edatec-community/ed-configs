@@ -482,3 +482,11 @@ platform = "CM4"
 board = "Plc2010Iobase"
 subboard = "None"
 screen = "None"
+
+[[models]]
+name = "IPC3400"
+config = "ipc3400"
+platform = "CM5"
+board = "ipc3400"
+subboard = "None"
+screen = "None"
