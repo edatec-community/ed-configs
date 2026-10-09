@@ -73,40 +73,57 @@ def _detect_ubuntu(root: Path) -> bool:
     return values.get("ID", "").casefold() == "ubuntu"
 
 
-def _without_managed_block(lines: list[str]) -> list[str]:
-    result: list[str] = []
-    inside = False
-    found_begin = False
-    for line in lines:
-        if line == BEGIN:
-            if inside or found_begin:
+def _split_managed_block(current: str) -> tuple[str, str, bool]:
+    lines = current.splitlines(keepends=True)
+    begin = end = None
+    for index, line in enumerate(lines):
+        value = line.rstrip("\r\n")
+        if value == BEGIN:
+            if begin is not None:
                 raise ApplyError("config.txt contains duplicate EDATEC managed blocks")
-            inside = True
-            found_begin = True
-            continue
-        if line == END:
-            if not inside:
+            begin = index
+        elif value == END:
+            if begin is None or end is not None:
                 raise ApplyError("config.txt contains an unmatched EDATEC managed block marker")
-            inside = False
-            continue
-        if not inside:
-            result.append(line)
-    if inside:
+            end = index
+    if begin is not None and end is None:
         raise ApplyError("config.txt contains an unterminated EDATEC managed block")
+    if begin is None:
+        return current, "", False
+    return "".join(lines[:begin]), "".join(lines[end + 1:]), True
+
+
+def _active_config_lines(content: str, platform: str) -> set[str]:
+    active = True
+    result: set[str] = set()
+    for line in content.splitlines():
+        value = line.strip()
+        if value.startswith("[") and value.endswith("]"):
+            active = value[1:-1].casefold() in {"all", platform.casefold()}
+        elif active and value and not value.startswith("#"):
+            result.add(value)
     return result
 
 
-def _config_content(current: str | None, desired: list[str], known: set[str]) -> str:
-    lines = _without_managed_block((current or "").splitlines())
-    # Remove exact lines previously managed by this catalog before rebuilding
-    # the managed block, while retaining all unrelated customer configuration.
-    lines = [line for line in lines if line not in known]
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if lines:
-        lines.append("")
-    lines.extend([BEGIN, *desired, END])
-    return "\n".join(lines) + "\n"
+def _config_content(current: str | None, desired: list[str], platform: str) -> str:
+    original = current or ""
+    before, after, has_block = _split_managed_block(original)
+    # Only the marked block belongs to ed-config. A line matching the catalog
+    # outside that block may have been supplied by the OS or the user.
+    existing = _active_config_lines(before + after, platform)
+    managed_lines = [line for line in desired if line not in existing]
+    managed = "\n".join([BEGIN, *managed_lines, END]) + "\n"
+    if has_block:
+        return before + managed + after
+    if not original:
+        return managed
+    if original.endswith("\n\n"):
+        separator = ""
+    elif original.endswith("\n"):
+        separator = "\n"
+    else:
+        separator = "\n\n"
+    return original + separator + managed
 
 
 def _release_content(current: str | None, code: int) -> str:
@@ -533,7 +550,9 @@ def build_plan(
             "_gid": gid,
         })
 
-    config_content = _config_content(_read(config_path), desired, catalog.known_config_lines())
+    config_content = _config_content(
+        _read(config_path), desired, str(resolution["identity"]["platform"])
+    )
     write_operation("config", config_path, config_content)
 
     selected_rules: set[str] = set()

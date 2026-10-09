@@ -629,21 +629,6 @@ class Catalog:
             )
         return self.resolve(str(model["name"]), option_names)
 
-    def known_config_lines(self) -> set[str]:
-        result: set[str] = set()
-        for family in self.families.values():
-            result.update(str(line) for line in family.get("config_lines", []))
-        for option in self.options.values():
-            for key in (
-                "config_lines",
-                "cm4_config_lines",
-                "pi4_config_lines",
-                "cm5_config_lines",
-                "pi5_config_lines",
-            ):
-                result.update(str(line) for line in option.get(key, []))
-        return result
-
     def known_rule_paths(self) -> set[str]:
         return {
             str(rule["path"])
