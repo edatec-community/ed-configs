@@ -1,0 +1,8 @@
+format = "ed-config-family"
+version = 1
+id = "ipc3400"
+platform = "CM5"
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+]

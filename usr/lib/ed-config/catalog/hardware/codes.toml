@@ -55,6 +55,7 @@ SBC2321 = 22
 Plc2010Iobase = 23
 GWL2010 = 24
 GWL2110 = 25
+IPC3400 = 26
 
 [subboards]
 None = 0
