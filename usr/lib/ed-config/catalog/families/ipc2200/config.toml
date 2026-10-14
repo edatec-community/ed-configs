@@ -1,0 +1,12 @@
+format = "ed-config-family"
+version = 1
+id = "ipc2200"
+platform = "CM4"
+disable_config_on_ubuntu = true
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "dtoverlay=ed-ipc,ipc2210",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+  "enable_uart=1",
+]

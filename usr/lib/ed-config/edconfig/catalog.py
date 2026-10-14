@@ -392,7 +392,17 @@ class Catalog:
             has_field = all(
                 key in option for key in ("code_shift", "code_width", "code_value")
             )
-            if has_bit == has_field:
+            has_any_field = any(
+                key in option for key in ("code_shift", "code_width", "code_value")
+            )
+            config_only = option.get("config_only", False)
+            if not isinstance(config_only, bool):
+                raise ConfigError(f"option {name} has invalid config_only")
+            if config_only and (has_bit or has_any_field):
+                raise ConfigError(
+                    f"config-only option {name} must not define product-code fields"
+                )
+            if not config_only and has_bit == has_field:
                 raise ConfigError(
                     f"option {name} must define exactly one code bit or field"
                 )
@@ -415,9 +425,26 @@ class Catalog:
                     for line in lines
                 ):
                     raise ConfigError(f"option {name} has invalid {key}")
+            allowed_models = option.get("models")
+            if allowed_models is not None:
+                if not isinstance(allowed_models, list) or not allowed_models or not all(
+                    isinstance(model, str) and model
+                    for model in allowed_models
+                ):
+                    raise ConfigError(f"option {name} has invalid models")
+                missing_models = [
+                    model for model in allowed_models
+                    if model.casefold() not in self.model_index
+                ]
+                if missing_models:
+                    raise ConfigError(
+                        f"option {name} references unknown models: {', '.join(missing_models)}"
+                    )
 
         option_masks: list[tuple[str, int, str | None]] = []
         for name, option in self.options.items():
+            if option.get("config_only", False):
+                continue
             if "code_bit" in option:
                 mask = 1 << int(option["code_bit"])
             else:
@@ -463,6 +490,8 @@ class Catalog:
                         f"options {groups[str(group)]} and {canonical} conflict"
                     )
                 groups[str(group)] = canonical
+            if option.get("config_only", False):
+                continue
             if "code_bit" in option:
                 code |= 1 << int(option["code_bit"])
             else:
@@ -536,6 +565,14 @@ class Catalog:
             raise ConfigError(f"unknown model: {requested}")
         family_id, family = self._family_for_model(model)
         options = self.canonical_options(option_names)
+        for name in options:
+            allowed_models = self.options[name].get("models")
+            if allowed_models is not None and str(model["name"]).casefold() not in {
+                str(item).casefold() for item in allowed_models
+            }:
+                raise ConfigError(
+                    f"option {name} is only supported for models: {', '.join(allowed_models)}"
+                )
         lines = [
             {"order": index + 10, "value": str(value)}
             for index, value in enumerate(family["config_lines"])

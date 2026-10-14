@@ -4,6 +4,10 @@ version = 1
 code_bit = 30
 config_lines = ["dtparam=ant2"]
 
+[options.ddr]
+config_only = true
+models = ["IPC2210", "IPC2220"]
+
 [options.camera]
 code_bit = 29
 cm4_config_lines = ["dtoverlay=imx219"]

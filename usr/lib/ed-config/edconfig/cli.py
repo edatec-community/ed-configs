@@ -26,6 +26,8 @@ def _options(args: argparse.Namespace) -> list[str]:
         values.append(f"lte.{args.lte}")
     if args.supercapacitor:
         values.append("supercapacitor")
+    if args.ddr:
+        values.append("ddr")
     return values
 
 
@@ -36,6 +38,7 @@ def _option_label(options: list[str]) -> str:
         "lte.4g": "4G LTE",
         "lte.5g": "5G LTE",
         "supercapacitor": "Supercapacitor",
+        "ddr": "DDR",
     }
     return ", ".join(labels.get(item, item) for item in options) or "None"
 
@@ -58,6 +61,12 @@ def parser() -> argparse.ArgumentParser:
     apply.add_argument("-m", "--model", required=True, help="product model, for example IPC2130")
     apply.add_argument("-w", "--wifi", action="store_true", help="enable Wi-Fi configuration")
     apply.add_argument("-c", "--camera", action="store_true", help="enable camera configuration")
+    apply.add_argument(
+        "-d",
+        "--ddr",
+        action="store_true",
+        help="indicate DDR is installed on IPC2210/IPC2220 and configure detected SATA USB storage",
+    )
     apply.add_argument(
         "-l",
         "--lte",

@@ -33,6 +33,7 @@ DPKG_DEB = "/usr/bin/dpkg-deb"
 DPKG_QUERY = "/usr/bin/dpkg-query"
 ALSACTL = "/usr/sbin/alsactl"
 _ALSA_STATE_HEADER = re.compile(r"^state\.([^\s{]+)\s*\{\s*$")
+_USB_ID = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{4}$", re.IGNORECASE)
 
 
 def rooted(root: Path, absolute: str) -> Path:
@@ -71,6 +72,154 @@ def _detect_ubuntu(root: Path) -> bool:
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"')
     return values.get("ID", "").casefold() == "ubuntu"
+
+
+def _detect_sata_usb_storage_ids(root: Path) -> list[str]:
+    """Find SATA USB disk VID:PID pairs, matching the old firmware package."""
+    lsusb = shutil.which("lsusb")
+    udevadm = shutil.which("udevadm")
+    if not lsusb or not udevadm:
+        return []
+    try:
+        usb_result = subprocess.run(
+            [lsusb], capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return []
+    if usb_result.returncode != 0:
+        return []
+
+    sata_ids: set[str] = set()
+    for line in usb_result.stdout.splitlines():
+        match = re.search(
+            r"\bID\s+([0-9a-f]{4}):([0-9a-f]{4})\b(.*)$", line, re.IGNORECASE
+        )
+        if match and "sata" in match.group(3).casefold():
+            sata_ids.add(f"{match.group(1)}:{match.group(2)}".casefold())
+    if not sata_ids:
+        return []
+
+    found: set[str] = set()
+    for device in sorted((root / "dev").glob("sd*")):
+        if not re.fullmatch(r"sd[a-z]+", device.name):
+            continue
+        try:
+            result = subprocess.run(
+                [udevadm, "info", "--query=property", f"--name={device}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            continue
+        if result.returncode != 0:
+            continue
+        properties = {}
+        for line in result.stdout.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                properties[key] = value
+        bus = properties.get("ID_BUS", "").casefold()
+        if bus != "usb" and not properties.get("ID_USB_DRIVER"):
+            continue
+        vendor = properties.get("ID_VENDOR_ID") or properties.get("ID_USB_VENDOR_ID")
+        product = properties.get("ID_MODEL_ID") or properties.get("ID_USB_MODEL_ID")
+        if not vendor or not product:
+            continue
+        device_id = f"{vendor}:{product}".casefold()
+        if _USB_ID.fullmatch(device_id) and device_id in sata_ids:
+            found.add(device_id)
+    return sorted(found)
+
+
+def _managed_usb_storage_quirks(root: Path) -> set[str]:
+    status = read_status(root)
+    current = status.get("current")
+    if not isinstance(current, dict):
+        return set()
+    values = current.get("managed_usb_storage_quirks", [])
+    if not isinstance(values, list):
+        return set()
+    return {
+        str(value).casefold()
+        for value in values
+        if isinstance(value, str) and _USB_ID.fullmatch(value)
+    }
+
+
+def _cmdline_with_usb_storage_quirks(
+    current: str,
+    previously_managed: set[str],
+    desired: set[str],
+) -> tuple[str, list[str]]:
+    """Update only ed-config-owned quirk entries and retain customer entries."""
+    ending_match = re.search(r"[\r\n]*$", current)
+    ending = ending_match.group(0) if ending_match else ""
+    body = current[: len(current) - len(ending)] if ending else current
+    tokens = body.split()
+    parameter_indexes = [
+        index for index, token in enumerate(tokens)
+        if token.startswith("usb-storage.quirks=")
+    ]
+    entries: list[str] = []
+    for index in parameter_indexes:
+        entries.extend(
+            value
+            for value in tokens[index].split("=", 1)[1].split(",")
+            if value
+        )
+
+    def entry_id(value: str) -> str | None:
+        if not value.endswith(":u"):
+            return None
+        candidate = value[:-2].casefold()
+        return candidate if _USB_ID.fullmatch(candidate) else None
+
+    removed = previously_managed - desired
+    removals_left = {device_id: 1 for device_id in removed}
+    updated_entries = []
+    for item in entries:
+        device_id = entry_id(item)
+        if device_id in removals_left and removals_left[device_id] > 0:
+            removals_left[device_id] -= 1
+            continue
+        updated_entries.append(item)
+    present_pairs = {
+        pair for item in updated_entries if (pair := entry_id(item))
+    }
+    newly_managed: set[str] = set()
+    for device_id in sorted(desired):
+        if not _USB_ID.fullmatch(device_id):
+            continue
+        item = f"{device_id}:u"
+        if device_id not in present_pairs:
+            updated_entries.append(item)
+            present_pairs.add(device_id)
+            newly_managed.add(device_id)
+    still_managed = previously_managed & desired & present_pairs
+    managed_next = sorted(still_managed | newly_managed)
+
+    old_parameters = [tokens[index] for index in parameter_indexes]
+    new_parameter = (
+        [f"usb-storage.quirks={','.join(updated_entries)}"]
+        if updated_entries
+        else []
+    )
+    if not entries and not desired and not removed:
+        return current, managed_next
+    if old_parameters == new_parameter:
+        return current, managed_next
+
+    if parameter_indexes:
+        first = parameter_indexes[0]
+        tokens = [
+            token for index, token in enumerate(tokens)
+            if index not in set(parameter_indexes)
+        ]
+        tokens[first:first] = new_parameter
+    elif new_parameter:
+        tokens.extend(new_parameter)
+    return (" ".join(tokens) + ending), managed_next
 
 
 def _split_managed_block(current: str) -> tuple[str, str, bool]:
@@ -143,7 +292,9 @@ def _release_content(current: str | None, code: int) -> str:
 
 
 def _rule_content(rule: dict[str, Any], ubuntu: bool) -> str:
-    content = rule.get("ubuntu_content") if ubuntu else rule.get("default_content")
+    content = rule.get("ubuntu_content") if ubuntu else None
+    if content is None:
+        content = rule.get("default_content")
     content = content if content is not None else rule.get("content")
     if not isinstance(content, str):
         raise ConfigError(f"udev rule {rule.get('path')} has no content for this OS")
@@ -278,7 +429,9 @@ def _merge_alsa_state(
 
     current_blocks = _alsa_state_blocks(current)
     if not current_blocks:
-        raise ApplyError("cannot merge ALSA state: current file contains no state blocks")
+        # An unrelated or empty state file has no recognizable ALSA card
+        # blocks to merge. Keep it intact as unmanaged customer content.
+        return current
 
     output: list[str] = []
     cursor = 0
@@ -500,6 +653,7 @@ def build_plan(
     root: Path,
     config_file: str | None = None,
     os_name: str = "auto",
+    detected_usb_storage_quirks: list[str] | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     if os_name not in {"auto", "ubuntu", "raspberrypi"}:
@@ -554,6 +708,45 @@ def build_plan(
         _read(config_path), desired, str(resolution["identity"]["platform"])
     )
     write_operation("config", config_path, config_content)
+
+    ddr_selected = "ddr" in resolution["options"]
+    try:
+        previous_usb_quirks = _managed_usb_storage_quirks(root)
+    except ConfigError:
+        if ddr_selected:
+            raise
+        # A legacy model does not depend on DDR tracking. If an old or
+        # malformed state file cannot be read, leave cmdline.txt untouched.
+        previous_usb_quirks = set()
+    if detected_usb_storage_quirks is None:
+        detected_usb_storage_quirks = (
+            _detect_sata_usb_storage_ids(root)
+            if ddr_selected and root == Path("/")
+            else []
+        )
+    detected_ids = {
+        str(value).casefold()
+        for value in detected_usb_storage_quirks
+        if isinstance(value, str) and _USB_ID.fullmatch(value)
+    }
+    desired_usb_quirks = (
+        detected_ids or previous_usb_quirks if ddr_selected else set()
+    )
+    managed_usb_quirks = set(previous_usb_quirks)
+    if ddr_selected or previous_usb_quirks:
+        cmdline_path = config_path.with_name("cmdline.txt")
+        current_cmdline = _read(cmdline_path)
+        if current_cmdline is not None:
+            cmdline_content, managed_usb_quirks_list = _cmdline_with_usb_storage_quirks(
+                current_cmdline,
+                previous_usb_quirks,
+                desired_usb_quirks,
+            )
+            managed_usb_quirks = set(managed_usb_quirks_list)
+            if cmdline_content != current_cmdline:
+                write_operation("cmdline", cmdline_path, cmdline_content)
+        elif not ddr_selected:
+            managed_usb_quirks = set()
 
     selected_rules: set[str] = set()
     managed_rule_contents = _catalog_rule_contents(catalog)
@@ -814,11 +1007,12 @@ def build_plan(
         "product_code": resolution["product_code"],
         "reboot_required": any(
             op["changed"] and op["kind"] in {
-                "config", "udev", "wireplumber", "alsa_profile", "alsa_config", "alsa",
+                "config", "cmdline", "udev", "wireplumber", "alsa_profile", "alsa_config", "alsa",
             }
             for op in operations
         ),
         "operations": operations,
+        "_managed_usb_storage_quirks": sorted(managed_usb_quirks),
         "_resolution": resolution,
     }
 
@@ -989,6 +1183,9 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 "error": None,
             },
         }
+        managed_usb_quirks = plan.get("_managed_usb_storage_quirks", [])
+        if managed_usb_quirks:
+            state["current"]["managed_usb_storage_quirks"] = managed_usb_quirks
         state_path = root / "var/lib/ed-config/state.json"
         _atomic_write(state_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n", 0o644)
         return {

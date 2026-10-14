@@ -20,6 +20,22 @@ subboard = "None"
 screen = "H101C"
 
 [[models]]
+name = "HMI2220_070C"
+config = "hmi2220_070c"
+platform = "CM4"
+board = "IPC2210"
+subboard = "None"
+screen = "H070C"
+
+[[models]]
+name = "HMI2220_101C"
+config = "hmi2220_101c"
+platform = "CM4"
+board = "IPC2210"
+subboard = "None"
+screen = "H101C"
+
+[[models]]
 name = "IPC2110"
 config = "ipc2100"
 platform = "CM4"
@@ -49,6 +65,30 @@ config = "ipc2100"
 platform = "CM4"
 board = "IPC2140"
 subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC2210"
+config = "ipc2200"
+platform = "CM4"
+board = "IPC2210"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC2220"
+config = "ipc2200"
+platform = "CM4"
+board = "IPC2220"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC2500"
+config = "ipc2200"
+platform = "CM4"
+board = "IPC2210"
+subboard = "S_IPC2500"
 screen = "None"
 
 [[models]]
