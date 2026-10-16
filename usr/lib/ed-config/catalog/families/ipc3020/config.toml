@@ -2,7 +2,6 @@ format = "ed-config-family"
 version = 1
 id = "ipc3020"
 platform = "PI5"
-desktop_config = "ipc3020"
 wireplumber_audio_format = "S16LE"
 wireplumber_modern_file = "audio/legacy-config/51-pipewire13-compat.conf"
 alsa_config_file = "audio/legacy-config/asound.conf"
