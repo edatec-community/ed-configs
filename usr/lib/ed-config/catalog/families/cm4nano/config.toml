@@ -4,7 +4,7 @@ id = "cm4nano"
 platform = "CM4"
 
 config_lines = [
-  "dtparam=i2c_vc=on",
+  "dtparam=i2c_arm=on",
   "otg_mode=1",
   "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
   "dtoverlay=sdhost,gpios_22_27,preserve_mmc",

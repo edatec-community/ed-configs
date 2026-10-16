@@ -4,7 +4,7 @@ id = "plc2010"
 platform = "CM4"
 
 config_lines = [
-    "dtparam=i2c_vc=on",
+    "dtparam=i2c_arm=on",
     "dtoverlay=uart2",
     "dtoverlay=uart3",
     "dtoverlay=uart4",

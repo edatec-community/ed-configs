@@ -6,5 +6,5 @@ platform = "CM4"
 config_lines = [
     "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
     "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
-    "dtparam=i2c_vc=on",
+    "dtparam=i2c_arm=on",
 ]
