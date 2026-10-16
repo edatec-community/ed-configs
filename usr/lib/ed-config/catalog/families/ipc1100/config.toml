@@ -1,0 +1,32 @@
+format = "ed-config-family"
+version = 1
+id = "ipc1100"
+platform = "CM0"
+unsupported_options = ["lte.5g"]
+option_config_lines = { "lte.4g" = ["gpio=0=op,dh", "gpio=1=op,dh"] }
+systemd_services = ["ed-ec800m.service"]
+
+config_lines = [
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+  "dtoverlay=dwc2,dr_mode=host",
+  "dtparam=spi=on",
+  "dtparam=i2c_arm=on",
+  "enable_uart=1",
+]
+
+[[managed_files]]
+path = "/usr/bin/ed-ec800"
+content_file = "ed-ec800"
+mode = 0o755
+option = "lte.4g"
+
+[[managed_files]]
+path = "/usr/lib/systemd/system/ed-ec800m.service"
+content_file = "ed-ec800m.service"
+mode = 0o644
+option = "lte.4g"
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"
+exact_content = true

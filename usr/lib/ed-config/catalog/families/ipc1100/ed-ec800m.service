@@ -1,0 +1,12 @@
+[Unit]
+Description=EDATEC EC800M
+After=network.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/ed-ec800 on
+ExecStart=/usr/bin/ed-ec800 daemon
+ExecStop=/usr/bin/ed-ec800 off
+
+[Install]
+WantedBy=multi-user.target

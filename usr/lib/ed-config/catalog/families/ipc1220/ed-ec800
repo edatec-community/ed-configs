@@ -1,0 +1,52 @@
+#!/bin/sh
+
+power_on(){
+    echo "power on"
+    gpioset -t0 4G_PWR=1
+    gpioset -t0 4G_RST=1
+    sleep 0.1
+    gpioset -t0 4G_PWR=0
+    sleep 0.3
+    gpioset -t0 4G_PWR=1
+    sleep 0.1
+    gpioset -t0 4G_RST=0
+    sleep 0.7
+    gpioset -t0 4G_PWR=0
+}
+
+power_off(){
+    echo "power off"
+    gpioset -t0 4G_PWR=0
+    sleep 0.1
+    gpioset -t0 4G_PWR=1
+    sleep 0.7
+    gpioset -t0 4G_PWR=0
+}
+
+daemon_run(){
+    while true
+    do
+        lsusb | grep -q "Quectel Wireless"
+        if [ $? -ne 0 ];then
+            power_off
+            sleep 0.2
+            power_on
+        fi
+        sleep 20
+    done
+}
+
+case "$1" in
+    "on")
+        power_on
+        exit 0
+        ;;
+    "off")
+        power_off
+        exit 0
+        ;;
+    "daemon")
+        daemon_run
+        exit 0
+        ;;
+esac

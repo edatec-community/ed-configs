@@ -530,3 +530,35 @@ platform = "CM5"
 board = "ipc3400"
 subboard = "None"
 screen = "None"
+
+[[models]]
+name = "IPC1000"
+config = "ipc1000"
+platform = "CM0"
+board = "IPC1000"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC1100"
+config = "ipc1100"
+platform = "CM0"
+board = "IPC1100"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC1200"
+config = "ipc1200"
+platform = "CM0"
+board = "IPC1200"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC1220"
+config = "ipc1220"
+platform = "CM0"
+board = "IPC1200"
+subboard = "S_4X4Y2V2A"
+screen = "None"

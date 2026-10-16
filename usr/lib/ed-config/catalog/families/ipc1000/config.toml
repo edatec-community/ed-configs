@@ -1,0 +1,9 @@
+format = "ed-config-family"
+version = 1
+id = "ipc1000"
+platform = "CM0"
+
+config_lines = [
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+  "dtoverlay=dwc2,dr_mode=host",
+]

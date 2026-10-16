@@ -1,0 +1,10 @@
+[Unit]
+Description=EDATEC led init
+After=sysinit.target
+DefaultDependencies=no
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/ed-init
+[Install]
+WantedBy=sysinit.target

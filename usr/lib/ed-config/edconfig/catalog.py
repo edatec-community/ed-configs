@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -38,8 +39,13 @@ class Catalog:
         "platform",
         "config_lines",
         "udev_rules",
+        "managed_files",
+        "systemd_services",
+        "option_config_lines",
+        "unsupported_options",
         "disable_config_on_ubuntu",
         "desktop_config",
+        "goodix_touch_devices",
         "wireplumber_audio_format",
         "wireplumber_modern_file",
         "alsa_config_file",
@@ -49,7 +55,9 @@ class Catalog:
         "alsa_profile_path_files",
         "audio_packages",
     }
-    _RULE_FIELDS = {"path", "content_file", "default_file", "ubuntu_file"}
+    _RULE_FIELDS = {"path", "content_file", "default_file", "ubuntu_file", "exact_content"}
+    _MANAGED_FILE_FIELDS = {"path", "content_file", "mode", "option"}
+    _MANAGED_FILE_DIRECTORIES = {"/usr/bin", "/usr/lib/systemd/system"}
 
     def __init__(self, directory: Path):
         self.directory = directory.resolve()
@@ -63,6 +71,7 @@ class Catalog:
 
         self.data_paths: set[Path] = {self.manifest_path}
         self.family_directories: dict[str, Path] = {}
+        self.systemd_service_targets: dict[str, str] = {}
         self.models_path, models = self._load_file("models_file")
         self.options_path, options = self._load_file("options_file")
         self.codes_path, self.codes = self._load_file("codes_file")
@@ -241,6 +250,37 @@ class Catalog:
         ):
             raise ConfigError(f"family package {family_id} has invalid config_lines")
         self._validate_config_lines(family_id, lines)
+        option_names = {str(name).casefold() for name in self.options}
+        option_config_lines = family.get("option_config_lines", {})
+        if not isinstance(option_config_lines, dict):
+            raise ConfigError(
+                f"family package {family_id} option_config_lines must be a table"
+            )
+        for option_name, option_lines in option_config_lines.items():
+            if str(option_name).casefold() not in option_names:
+                raise ConfigError(
+                    f"family package {family_id} references unknown option {option_name}"
+                )
+            if not isinstance(option_lines, list) or not all(
+                isinstance(line, str) and line.strip() and "\n" not in line
+                for line in option_lines
+            ):
+                raise ConfigError(
+                    f"family package {family_id} has invalid config lines for {option_name}"
+                )
+            self._validate_config_lines(f"{family_id}/{option_name}", option_lines)
+        unsupported_options = family.get("unsupported_options", [])
+        if (
+            not isinstance(unsupported_options, list)
+            or any(
+                not isinstance(option, str)
+                or option.casefold() not in option_names
+                for option in unsupported_options
+            )
+            or len({option.casefold() for option in unsupported_options})
+            != len(unsupported_options)
+        ):
+            raise ConfigError(f"family package {family_id} has invalid unsupported_options")
         disable = family.get("disable_config_on_ubuntu", False)
         if not isinstance(disable, bool):
             raise ConfigError(
@@ -249,6 +289,20 @@ class Catalog:
         desktop = family.get("desktop_config")
         if desktop is not None and not isinstance(desktop, str):
             raise ConfigError(f"family package {family_id} has invalid desktop_config")
+        goodix_touch_devices = family.get("goodix_touch_devices", [])
+        if (
+            not isinstance(goodix_touch_devices, list)
+            or any(
+                not isinstance(device, str)
+                or not device.strip()
+                or any(character in device for character in '\n\r"<>')
+                for device in goodix_touch_devices
+            )
+            or len(set(goodix_touch_devices)) != len(goodix_touch_devices)
+        ):
+            raise ConfigError(
+                f"family package {family_id} has invalid goodix_touch_devices"
+            )
         if "wireplumber_audio_format" in family:
             if family["wireplumber_audio_format"] != "S16LE":
                 raise ConfigError(
@@ -278,6 +332,10 @@ class Catalog:
         if "alsa_state_blocks" in family and "alsa_state_file" not in family:
             raise ConfigError(
                 f"family package {family_id} has alsa_state_blocks without alsa_state_file"
+            )
+        if "alsa_state_file" in family and "alsa_state_blocks" not in family:
+            raise ConfigError(
+                f"family package {family_id} is missing alsa_state_blocks"
             )
         if "alsa_profile_set_file" in family:
             self._rule_file(
@@ -325,12 +383,106 @@ class Catalog:
                     package,
                     f"family package {family_id} audio package",
                 )
+        managed_files = family.get("managed_files", [])
+        if not isinstance(managed_files, list):
+            raise ConfigError(f"family package {family_id} managed_files must be an array")
+        package_dir = self.family_directories[family_id.casefold()]
+        managed_targets: set[str] = set()
+        unit_targets: set[str] = set()
+        for asset in managed_files:
+            if not isinstance(asset, dict):
+                raise ConfigError(f"family package {family_id} contains an invalid managed file")
+            unknown = sorted(str(key) for key in asset if key not in self._MANAGED_FILE_FIELDS)
+            if unknown:
+                raise ConfigError(
+                    f"family package {family_id} managed file has unknown fields: {', '.join(unknown)}"
+                )
+            target = asset.get("path")
+            if (
+                not isinstance(target, str)
+                or Path(target).parent.as_posix() not in self._MANAGED_FILE_DIRECTORIES
+                or Path(target).name in {"", ".", ".."}
+                or not re.fullmatch(r"[A-Za-z0-9_.+-]+", Path(target).name)
+            ):
+                raise ConfigError(f"unsafe managed file path: {target!r}")
+            if target in managed_targets:
+                raise ConfigError(f"family package {family_id} duplicates managed file {target}")
+            managed_targets.add(target)
+            mode = asset.get("mode")
+            allowed_mode = 0o755 if Path(target).parent == Path("/usr/bin") else 0o644
+            if mode != allowed_mode:
+                raise ConfigError(
+                    f"family package {family_id} managed file {target} mode must be {oct(allowed_mode)}"
+                )
+            content_file = asset.get("content_file")
+            content_path = self._rule_file(
+                package_dir, content_file, f"family package {family_id} managed file"
+            )
+            option_name = asset.get("option")
+            if option_name is not None and (
+                not isinstance(option_name, str)
+                or option_name.casefold() not in option_names
+            ):
+                raise ConfigError(
+                    f"family package {family_id} managed file has unknown option {option_name!r}"
+                )
+            if Path(target).parent == Path("/usr/lib/systemd/system") and target.endswith(".service"):
+                service_name = Path(target).name
+                unit_targets.add(service_name)
+                service_target = self._service_install_target(
+                    content_path, family_id, service_name
+                )
+                previous_target = self.systemd_service_targets.get(service_name)
+                if previous_target is not None and previous_target != service_target:
+                    raise ConfigError(
+                        f"service {service_name} has conflicting WantedBy targets "
+                        f"{previous_target} and {service_target}"
+                    )
+                self.systemd_service_targets[service_name] = service_target
+        services = family.get("systemd_services", [])
+        if (
+            not isinstance(services, list)
+            or any(
+                not isinstance(service, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.@+-]+\.service", service)
+                or service not in unit_targets
+                for service in services
+            )
+            or len(set(services)) != len(services)
+        ):
+            raise ConfigError(
+                f"family package {family_id} systemd_services must name managed service files"
+            )
         rules = family.get("udev_rules", [])
         if not isinstance(rules, list):
             raise ConfigError(f"family package {family_id} udev_rules must be an array")
         targets: set[str] = set()
         for rule in rules:
             self._validate_rule(family_id, rule, targets)
+
+    @staticmethod
+    def _service_install_target(path: Path, family_id: str, service: str) -> str:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ConfigError(
+                f"cannot read systemd unit for family package {family_id}: {exc}"
+            ) from exc
+        section = ""
+        wanted_by: list[str] = []
+        for line in lines:
+            value = line.strip()
+            if value.startswith("[") and value.endswith("]"):
+                section = value[1:-1]
+            elif section == "Install" and value.startswith("WantedBy="):
+                wanted_by.extend(value.partition("=")[2].split())
+        if len(wanted_by) != 1 or not re.fullmatch(
+            r"[A-Za-z0-9_.@:-]+\.target", wanted_by[0]
+        ):
+            raise ConfigError(
+                f"systemd unit {service} in family package {family_id} must declare one valid WantedBy target"
+            )
+        return wanted_by[0]
 
     def _validate_rule(
         self, family_id: str, rule: Any, targets: set[str]
@@ -348,6 +500,8 @@ class Catalog:
         if target in targets:
             raise ConfigError(f"family package {family_id} duplicates udev rule {target}")
         targets.add(target)
+        if "exact_content" in rule and not isinstance(rule["exact_content"], bool):
+            raise ConfigError(f"family package {family_id} has invalid exact_content for {target}")
         has_content = "content_file" in rule
         has_default = "default_file" in rule
         if has_content == has_default or ("ubuntu_file" in rule and not has_default):
@@ -371,6 +525,8 @@ class Catalog:
     ) -> dict[str, Any]:
         package_dir = self.family_directories[family_id.casefold()]
         result: dict[str, Any] = {"path": str(rule["path"])}
+        if rule.get("exact_content"):
+            result["exact_content"] = True
         for source_field, content_field in (
             ("content_file", "content"),
             ("default_file", "default_content"),
@@ -548,7 +704,7 @@ class Catalog:
             if line.startswith("dtoverlay=") or "=" not in line:
                 continue
             key, remainder = line.split("=", 1)
-            if key == "dtparam" and "=" in remainder:
+            if key == "dtparam":
                 key = f"dtparam:{remainder.split('=', 1)[0]}"
             elif key == "gpio" and "=" in remainder:
                 key = f"gpio:{remainder.split('=', 1)[0]}"
@@ -566,6 +722,9 @@ class Catalog:
         family_id, family = self._family_for_model(model)
         options = self.canonical_options(option_names)
         for name in options:
+            unsupported_options = family.get("unsupported_options", [])
+            if name.casefold() in {item.casefold() for item in unsupported_options}:
+                raise ConfigError(f"option {name} is not supported for model {model['name']}")
             allowed_models = self.options[name].get("models")
             if allowed_models is not None and str(model["name"]).casefold() not in {
                 str(item).casefold() for item in allowed_models
@@ -584,6 +743,9 @@ class Catalog:
             option_lines = list(option.get("config_lines", []))
             option_lines += list(
                 option.get(f"{str(model['platform']).casefold()}_config_lines", [])
+            )
+            option_lines += list(
+                family.get("option_config_lines", {}).get(name, [])
             )
             for line in option_lines:
                 if line not in values:
@@ -617,6 +779,30 @@ class Catalog:
                 result.append(str(path))
             return result
 
+        managed_files = []
+        for asset in family.get("managed_files", []):
+            if asset.get("option") and asset["option"].casefold() not in {
+                option.casefold() for option in options
+            }:
+                continue
+            path = self._rule_file(
+                package_dir,
+                asset["content_file"],
+                f"family package {family_id} managed file",
+            )
+            try:
+                content = path.read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ConfigError(f"cannot read managed file {path}: {exc}") from exc
+            managed_files.append(
+                {"path": str(asset["path"]), "content": content, "mode": asset["mode"]}
+            )
+        selected_unit_names = {
+            Path(str(asset["path"])).name
+            for asset in managed_files
+            if str(asset["path"]).endswith(".service")
+        }
+
         return {
             "format": "ed-config-resolution",
             "schema_version": 3,
@@ -632,6 +818,9 @@ class Catalog:
                 family.get("disable_config_on_ubuntu", False)
             ),
             "screen_config": family.get("desktop_config"),
+            "screen_goodix_touch_devices": list(
+                family.get("goodix_touch_devices", [])
+            ),
             "wireplumber_audio_format": family.get("wireplumber_audio_format"),
             "wireplumber_modern": family_text("wireplumber_modern_file"),
             "alsa_config": family_text("alsa_config_file"),
@@ -653,6 +842,13 @@ class Catalog:
                 for path in family.get("alsa_profile_path_files", [])
             ],
             "audio_packages": family_path_list("audio_packages"),
+            "managed_files": managed_files,
+            "systemd_services": [
+                service
+                for service in family.get("systemd_services", [])
+                if service in selected_unit_names
+            ],
+            "systemd_service_targets": dict(self.systemd_service_targets),
             "config_lines": lines,
             "rules": rules,
         }

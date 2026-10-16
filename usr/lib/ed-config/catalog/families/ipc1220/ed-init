@@ -1,0 +1,8 @@
+#!/bin/sh
+
+init_led(){
+    echo "init led state"
+    gpioset -t0 USER_LED_GED=0 USER_LED_RED=0
+}
+
+init_led

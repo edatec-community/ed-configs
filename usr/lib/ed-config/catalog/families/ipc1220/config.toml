@@ -1,0 +1,55 @@
+format = "ed-config-family"
+version = 1
+id = "ipc1220"
+platform = "CM0"
+disable_config_on_ubuntu = true
+unsupported_options = ["lte.5g"]
+systemd_services = ["ed-init.service", "ed-ec800m.service"]
+
+config_lines = [
+  "dtparam=i2c_arm=on",
+  "dtoverlay=wk2xxx-uart,ipc1200",
+  "dtoverlay=ed-ipc,ipc1220",
+  "dtoverlay=ads1015",
+  "dtparam=cha_enable",
+  "dtparam=cha_cfg=4",
+  "dtparam=cha_gain=1",
+  "dtparam=chb_enable",
+  "dtparam=chb_cfg=5",
+  "dtparam=chb_gain=1",
+  "dtparam=chc_enable",
+  "dtparam=chc_cfg=6",
+  "dtparam=chc_gain=1",
+  "dtparam=chd_enable",
+  "dtparam=chd_cfg=7",
+  "dtparam=chd_gain=1",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+  "enable_uart=1",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"
+
+[[managed_files]]
+path = "/usr/bin/ed-init"
+content_file = "ed-init"
+mode = 493
+
+[[managed_files]]
+path = "/usr/lib/systemd/system/ed-init.service"
+content_file = "ed-init.service"
+mode = 420
+
+[[managed_files]]
+path = "/usr/bin/ed-ec800"
+content_file = "ed-ec800"
+mode = 493
+option = "lte.4g"
+
+[[managed_files]]
+path = "/usr/lib/systemd/system/ed-ec800m.service"
+content_file = "ed-ec800m.service"
+mode = 420
+option = "lte.4g"
+

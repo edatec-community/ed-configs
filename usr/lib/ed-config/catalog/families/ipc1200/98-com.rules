@@ -1,0 +1,3 @@
+KERNEL=="ttyS0", SYMLINK+="com1"
+KERNEL=="ttysWK0", SYMLINK+="com2"
+KERNEL=="ttysWK1", SYMLINK+="com3"

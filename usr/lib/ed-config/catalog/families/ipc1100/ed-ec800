@@ -1,0 +1,67 @@
+#!/bin/sh
+
+is_gpio_high(){
+    pinctrl get $1 | grep -q '| hi'
+    return $?
+}
+
+init_pin(){
+    pin=$1
+    is_gpio_high $pin
+    if [ $? -ne $pin ];then
+        pinctrl set $pin op dh
+        sleep 0.1
+    fi
+}
+
+
+
+power_on(){
+    is_gpio_high 1
+    if [ $? -ne 0 ];then
+        power_off
+    fi
+
+    pinctrl set 1 op dl
+    sleep 0.1
+    pinctrl set 1 op dh
+    sleep 0.03
+    pinctrl set 0 op dl
+    sleep 0.7
+    pinctrl set 1 op dl
+}
+
+power_off(){
+    # pinctrl set 1 op dh
+    
+    pinctrl set 0 op dh
+    sleep 0.7
+}
+
+daemon_run(){
+    while true
+    do
+        lsusb | grep -q "Quectel Wireless"
+        if [ $? -ne 0 ];then
+            power_off
+            sleep 0.5
+            power_on
+        fi
+        sleep 20
+    done
+}
+
+case "$1" in
+    "on")
+        power_on
+        exit 0
+        ;;
+    "off")
+        power_off
+        exit 0
+        ;;
+    "daemon")
+        daemon_run
+        exit 0
+        ;;
+esac    

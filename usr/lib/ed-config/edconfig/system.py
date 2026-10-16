@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -298,6 +299,8 @@ def _rule_content(rule: dict[str, Any], ubuntu: bool) -> str:
     content = content if content is not None else rule.get("content")
     if not isinstance(content, str):
         raise ConfigError(f"udev rule {rule.get('path')} has no content for this OS")
+    if rule.get("exact_content"):
+        return content
     return content if content.endswith("\n") else content + "\n"
 
 
@@ -390,13 +393,6 @@ def _alsa_state_blocks(content: str) -> dict[str, tuple[int, int]]:
     if active_name is not None:
         raise ConfigError(f"malformed ALSA state: unterminated state.{active_name} block")
     return blocks
-
-
-def _alsa_state_block_names(contents: set[str]) -> set[str]:
-    names: set[str] = set()
-    for content in contents:
-        names.update(_alsa_state_blocks(content))
-    return names
 
 
 def _merge_alsa_state(
@@ -502,15 +498,69 @@ def _catalog_rule_contents(catalog: Catalog) -> set[str]:
     return contents
 
 
-def _wireplumber_content(root: Path, target: Path, audio_format: str) -> str | None:
+def _catalog_managed_file_contents(catalog: Catalog) -> dict[str, set[str]]:
+    contents: dict[str, set[str]] = {}
+    for family_id, family in catalog.families.items():
+        package_dir = catalog.family_directories[family_id.casefold()]
+        for asset in family.get("managed_files", []):
+            path = package_dir / str(asset["content_file"])
+            try:
+                content = path.read_bytes().decode("utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ConfigError(f"cannot read managed file {path}: {exc}") from exc
+            contents.setdefault(str(asset["path"]), set()).add(content)
+    return contents
+
+
+def _tracked_managed_files(root: Path, known_paths: set[str]) -> dict[str, str]:
+    try:
+        current = read_status(root).get("current")
+    except ConfigError:
+        return {}
+    if not isinstance(current, dict):
+        return {}
+    hashes = current.get("managed_file_hashes", {})
+    if not isinstance(hashes, dict):
+        return {}
+    return {
+        path: digest
+        for path, digest in hashes.items()
+        if isinstance(path, str)
+        and path in known_paths
+        and isinstance(digest, str)
+        and re.fullmatch(r"[0-9a-f]{64}", digest)
+    }
+
+
+def _tracked_systemd_services(root: Path, known_services: set[str]) -> set[str]:
+    if not known_services:
+        return set()
+    try:
+        current = read_status(root).get("current")
+    except ConfigError:
+        # Legacy models do not depend on systemd ownership metadata. Preserve
+        # their ability to recover from an invalid state file as before.
+        return set()
+    if not isinstance(current, dict):
+        return set()
+    services = current.get("managed_systemd_services", [])
+    if not isinstance(services, list):
+        return set()
+    return {service for service in services if isinstance(service, str) and service in known_services}
+
+
+def _symlink_target(path: Path) -> str | None:
+    try:
+        return os.readlink(path) if path.is_symlink() else None
+    except OSError:
+        return None
+
+
+def _wireplumber_content(root: Path, audio_format: str) -> str | None:
     """Reproduce the DEB's copy-and-edit of the distro Lua configuration."""
     source = rooted(root, WIREPLUMBER_SOURCE)
-    source_content = _read(source)
-    target_content = _read(target)
-    content = source_content if source_content is not None else target_content
+    content = _read(source)
     if content is None:
-        # The shell postinst's cp/grep/sed sequence leaves no file when the
-        # distro source and previous target are both absent.
         return None
 
     lines = content.splitlines()
@@ -691,14 +741,25 @@ def build_plan(
         gid: int | None = None,
     ) -> None:
         current = _read(path)
+        try:
+            original_mode = stat.S_IMODE(path.stat().st_mode)
+        except OSError:
+            original_mode = None
+        mode_changed = (
+            kind == "managed_file"
+            and mode is not None
+            and original_mode is not None
+            and original_mode != mode
+        )
         operations.append({
             "kind": kind,
             "action": "write",
             "path": "/" + path.relative_to(root).as_posix(),
-            "changed": current != content,
+            "changed": current != content or mode_changed,
             "_target": path,
             "_content": content,
             "_original": current,
+            "_original_mode": original_mode,
             "_mode": mode,
             "_uid": uid,
             "_gid": gid,
@@ -768,22 +829,147 @@ def build_plan(
                 "_original": _read(target),
             })
 
+    managed_file_contents = _catalog_managed_file_contents(catalog)
+    previously_managed_files = _tracked_managed_files(root, set(managed_file_contents))
+    managed_files_after: dict[str, str] = {}
+    managed_executables: set[str] = set()
+
+    def known_managed_content(path: str, current: str | None) -> bool:
+        if current is None:
+            return True
+        prior_digest = previously_managed_files.get(path)
+        return prior_digest is not None and hashlib.sha256(current.encode("utf-8")).hexdigest() == prior_digest
+
+    selected_managed_paths: set[str] = set()
+    for asset in resolution.get("managed_files", []):
+        path = str(asset["path"])
+        selected_managed_paths.add(path)
+        target = rooted(root, path)
+        current = _read(target)
+        # Do not follow or replace customer-created symlinks at managed paths.
+        if target.is_symlink():
+            continue
+        owned_by_ed_config = known_managed_content(path, current)
+        asset_content = str(asset["content"])
+        asset_mode = int(asset["mode"])
+        try:
+            current_mode = stat.S_IMODE(target.stat().st_mode)
+        except OSError:
+            current_mode = None
+        already_matches_asset = current == asset_content and current_mode == asset_mode
+        if owned_by_ed_config:
+            write_operation("managed_file", target, asset_content, asset_mode)
+            managed_files_after[path] = hashlib.sha256(asset_content.encode("utf-8")).hexdigest()
+        if path.startswith("/usr/bin/") and (owned_by_ed_config or already_matches_asset):
+            managed_executables.add(path)
+    for path in sorted(managed_file_contents):
+        if path in selected_managed_paths or path not in previously_managed_files:
+            continue
+        target = rooted(root, path)
+        current = _read(target)
+        if not target.is_symlink() and current is not None and known_managed_content(path, current):
+            try:
+                original_mode = stat.S_IMODE(target.stat().st_mode)
+            except OSError:
+                original_mode = None
+            operations.append({
+                "kind": "managed_file",
+                "action": "delete",
+                "path": path,
+                "changed": True,
+                "_target": target,
+                "_original": current,
+                "_original_mode": original_mode,
+            })
+
+    selected_file_assets = {
+        str(asset["path"]): asset for asset in resolution.get("managed_files", [])
+    }
+    selected_services = set()
+    known_executables = {
+        path for path in managed_file_contents if path.startswith("/usr/bin/")
+    }
+    for service in resolution.get("systemd_services", []):
+        unit_path = f"/usr/lib/systemd/system/{service}"
+        asset = selected_file_assets.get(unit_path)
+        if asset is None:
+            continue
+        required_executables = {
+            path for path in known_executables if path in str(asset["content"])
+        }
+        if not required_executables <= managed_executables:
+            continue
+        target = rooted(root, unit_path)
+        current = _read(target)
+        try:
+            current_mode = stat.S_IMODE(target.stat().st_mode)
+        except OSError:
+            current_mode = None
+        unit_matches_asset = (
+            current == str(asset["content"])
+            and current_mode == int(asset["mode"])
+        )
+        if not target.is_symlink() and (
+            known_managed_content(unit_path, current) or unit_matches_asset
+        ):
+            selected_services.add(str(service))
+    known_service_targets = resolution.get("systemd_service_targets", {})
+    known_services = set(known_service_targets)
+    previously_managed_services = _tracked_systemd_services(root, known_services)
+    managed_services_after: set[str] = set()
+    for service in sorted(selected_services | previously_managed_services):
+        target_name = known_service_targets[service]
+        link_path = f"/etc/systemd/system/{target_name}.wants/{service}"
+        target = rooted(root, link_path)
+        desired_link = f"/usr/lib/systemd/system/{service}"
+        unit_path = f"/usr/lib/systemd/system/{service}"
+        unit_target = rooted(root, unit_path)
+        unit_current = _read(unit_target)
+        unit_is_managed = (
+            not unit_target.is_symlink()
+            and known_managed_content(unit_path, unit_current)
+        )
+        current_link = _symlink_target(target)
+        exists = os.path.lexists(target)
+        if service in selected_services:
+            if current_link == desired_link:
+                if service in previously_managed_services:
+                    managed_services_after.add(service)
+            elif not exists:
+                operations.append({
+                    "kind": "systemd",
+                    "action": "symlink",
+                    "path": link_path,
+                    "changed": True,
+                    "_target": target,
+                    "_symlink_target": desired_link,
+                    "_original_symlink_target": None,
+                })
+                managed_services_after.add(service)
+        elif current_link == desired_link and unit_is_managed:
+            operations.append({
+                "kind": "systemd",
+                "action": "delete",
+                "path": link_path,
+                "changed": True,
+                "_target": target,
+                "_original_symlink_target": current_link,
+            })
+
     if catalog.has_wireplumber_config():
         wp_format = resolution.get("wireplumber_audio_format")
         wp_source = rooted(root, WIREPLUMBER_SOURCE)
-        managed_legacy_wireplumber: set[str] = set()
+        managed_wireplumber_contents: set[str] = set()
         if wp_source.is_file():
             for audio_format in _catalog_field_values(catalog, "wireplumber_audio_format"):
-                content = _wireplumber_content(
-                    root, rooted(root, WIREPLUMBER_CONFIG), audio_format
-                )
+                content = _wireplumber_content(root, audio_format)
                 if content is not None:
-                    managed_legacy_wireplumber.add(content)
+                    managed_wireplumber_contents.add(content)
         if wp_source.is_file():
-            # Debian 12/WirePlumber 0.4 compatibility for the old DEB image.
+            # Debian 12/WirePlumber 0.4 uses the distro Lua configuration path.
             wp_target = rooted(root, WIREPLUMBER_CONFIG)
             wp_content = (
-                _wireplumber_content(root, wp_target, str(wp_format))
+                _wireplumber_content(root, str(wp_format))
                 if wp_format is not None
                 else None
             )
@@ -801,24 +987,18 @@ def build_plan(
         if wp_content is not None:
             current_wp = _read(wp_target)
             managed_wp = (
-                managed_legacy_wireplumber
+                managed_wireplumber_contents
                 if wp_target == rooted(root, WIREPLUMBER_CONFIG)
                 else _catalog_asset_contents(catalog, "wireplumber_modern_file")
             )
             if current_wp is None or current_wp in managed_wp:
                 write_operation("wireplumber", wp_target, str(wp_content), 0o644)
-        if wp_target != rooted(root, WIREPLUMBER_MODERN_CONFIG):
-            modern_target = rooted(root, WIREPLUMBER_MODERN_CONFIG)
-            if _read(modern_target) in _catalog_asset_contents(catalog, "wireplumber_modern_file"):
-                operations.append({
-                    "kind": "wireplumber",
-                    "action": "delete",
-                    "path": WIREPLUMBER_MODERN_CONFIG,
-                    "changed": True,
-                    "_target": modern_target,
-                    "_original": _read(modern_target),
-                })
-        elif wp_content is None and wp_target == rooted(root, WIREPLUMBER_MODERN_CONFIG) and _read(wp_target) in _catalog_asset_contents(catalog, "wireplumber_modern_file"):
+        if (
+            wp_target == rooted(root, WIREPLUMBER_MODERN_CONFIG)
+            and wp_content is None
+            and _read(wp_target)
+            in _catalog_asset_contents(catalog, "wireplumber_modern_file")
+        ):
             operations.append({
                 "kind": "wireplumber",
                 "action": "delete",
@@ -827,9 +1007,6 @@ def build_plan(
                 "_target": wp_target,
                 "_original": _read(wp_target),
             })
-        # The old postrm did not remove this copied WirePlumber file when the
-        # package was removed or another model was selected.
-
     alsa_restore_needed = False
     if catalog.has_alsa_config():
         asound_target = rooted(root, ASOUND_CONFIG)
@@ -852,16 +1029,11 @@ def build_plan(
     if catalog.has_alsa_config():
         state_target = rooted(root, ALSA_STATE)
         state_content = resolution.get("alsa_state")
-        managed_state = _catalog_asset_contents(catalog, "alsa_state_file")
         managed_names = {
             str(block)
             for family in catalog.families.values()
             for block in family.get("alsa_state_blocks", [])
         }
-        if not managed_names:
-            # Backward compatibility for catalogs created before explicit
-            # alsa_state_blocks metadata was introduced.
-            managed_names = _alsa_state_block_names(managed_state)
         current_state = _read(state_target)
         if state_content:
             selected_names = {
@@ -982,9 +1154,15 @@ def build_plan(
             "_target": None,
         })
 
-    for operation in screen_operations(
-        root, resolution["identity"]["platform"], resolution.get("screen_config")
-    ):
+    screen_changes = []
+    if resolution.get("screen_config") is not None:
+        screen_changes = screen_operations(
+            root,
+            resolution["identity"]["platform"],
+            resolution.get("screen_config"),
+            resolution.get("screen_goodix_touch_devices") or None,
+        )
+    for operation in screen_changes:
         write_operation(
             str(operation["kind"]),
             operation["path"],
@@ -1007,12 +1185,14 @@ def build_plan(
         "product_code": resolution["product_code"],
         "reboot_required": any(
             op["changed"] and op["kind"] in {
-                "config", "cmdline", "udev", "wireplumber", "alsa_profile", "alsa_config", "alsa",
+                "config", "cmdline", "udev", "managed_file", "systemd", "wireplumber", "alsa_profile", "alsa_config", "alsa",
             }
             for op in operations
         ),
         "operations": operations,
         "_managed_usb_storage_quirks": sorted(managed_usb_quirks),
+        "_managed_file_hashes": dict(sorted(managed_files_after.items())),
+        "_managed_systemd_services": sorted(managed_services_after),
         "_resolution": resolution,
     }
 
@@ -1037,6 +1217,7 @@ def _atomic_write(
     mode: int | None,
     uid: int | None = None,
     gid: int | None = None,
+    force_mode: bool = False,
 ) -> None:
     missing: list[Path] = []
     parent = path.parent
@@ -1048,7 +1229,10 @@ def _atomic_write(
         for directory in reversed(missing):
             os.chown(directory, uid if uid is not None else -1, gid if gid is not None else -1)
     previous = path.stat() if path.exists() else None
-    previous_mode = stat.S_IMODE(previous.st_mode) if previous else mode
+    previous_mode = stat.S_IMODE(previous.st_mode) if previous else None
+    write_mode = mode if force_mode and mode is not None else previous_mode
+    if previous is None:
+        write_mode = mode
     owner_uid = previous.st_uid if previous else uid
     owner_gid = previous.st_gid if previous else gid
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -1058,10 +1242,24 @@ def _atomic_write(
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        if previous_mode is not None:
-            os.chmod(temporary, previous_mode)
+        if write_mode is not None:
+            os.chmod(temporary, write_mode)
         if owner_uid is not None or owner_gid is not None:
             os.chown(temporary, owner_uid if owner_uid is not None else -1, owner_gid if owner_gid is not None else -1)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _atomic_symlink(path: Path, target: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        temporary.unlink()
+        os.symlink(target, temporary)
         os.replace(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)
@@ -1087,7 +1285,7 @@ def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
             op["changed"]
             and op["kind"] != "packages"
             and op.get("_target") is not None
-            and op["_target"].exists()
+            and (os.path.lexists(op["_target"]) if op["kind"] == "systemd" else op["_target"].exists())
         )
     ]
     if not changed:
@@ -1098,7 +1296,7 @@ def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
         source: Path = operation["_target"]
         destination = directory / source.relative_to(root)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        shutil.copy2(source, destination, follow_symlinks=operation["kind"] != "systemd")
     return directory
 
 
@@ -1125,6 +1323,8 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 target: Path = operation["_target"]
                 if operation["action"] == "delete":
                     target.unlink(missing_ok=True)
+                elif operation["action"] == "symlink":
+                    _atomic_symlink(target, operation["_symlink_target"])
                 else:
                     _atomic_write(
                         target,
@@ -1132,6 +1332,7 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                         operation.get("_mode"),
                         operation.get("_uid"),
                         operation.get("_gid"),
+                        force_mode=operation["kind"] == "managed_file",
                     )
                 completed.append(operation)
         except OSError as exc:
@@ -1142,15 +1343,22 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 target = applied["_target"]
                 original = applied.get("_original")
                 try:
-                    if original is None:
+                    if applied.get("kind") == "systemd":
+                        old_target = applied.get("_original_symlink_target")
+                        if old_target is None:
+                            target.unlink(missing_ok=True)
+                        else:
+                            _atomic_symlink(target, old_target)
+                    elif original is None:
                         target.unlink(missing_ok=True)
                     else:
                         _atomic_write(
                             target,
                             original,
-                            applied.get("_mode"),
+                            applied.get("_original_mode"),
                             applied.get("_uid"),
                             applied.get("_gid"),
+                            force_mode=applied["kind"] == "managed_file",
                         )
                 except OSError as rollback_error:
                     rollback_errors.append(f"{applied['path']}: {rollback_error}")
@@ -1186,6 +1394,12 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
         managed_usb_quirks = plan.get("_managed_usb_storage_quirks", [])
         if managed_usb_quirks:
             state["current"]["managed_usb_storage_quirks"] = managed_usb_quirks
+        managed_files = plan.get("_managed_file_hashes", {})
+        if managed_files:
+            state["current"]["managed_file_hashes"] = managed_files
+        managed_services = plan.get("_managed_systemd_services", [])
+        if managed_services:
+            state["current"]["managed_systemd_services"] = managed_services
         state_path = root / "var/lib/ed-config/state.json"
         _atomic_write(state_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n", 0o644)
         return {
@@ -1222,25 +1436,8 @@ def read_status(root: Path) -> dict[str, Any]:
     if not isinstance(state, dict):
         raise ConfigError(f"invalid status file {path}: expected a JSON object")
 
-    # One-time compatibility with state written by the initial implementation.
-    if state.get("schema_version") == 1 and "model" in state:
-        applied_at = state.get("applied_at")
-        state = {
-            "configured": True,
-            "current": {
-                "model": state.get("model"),
-                "options": state.get("options", []),
-                "product_code": state.get("product_code"),
-                "applied_at": applied_at,
-                "reboot_required": False,
-            },
-            "last_apply": {
-                "success": True,
-                "requested_model": state.get("model"),
-                "attempted_at": applied_at,
-                "error": None,
-            },
-        }
+    if state.get("format") != "ed-config-state" or state.get("schema_version") != 2:
+        raise ConfigError(f"invalid status file {path}: unsupported state format or schema")
     configured = bool(state.get("configured", False))
     current = state.get("current") if configured else None
     last_apply = state.get("last_apply")

@@ -10,6 +10,7 @@ models = ["IPC2210", "IPC2220"]
 
 [options.camera]
 code_bit = 29
+cm0_config_lines = ["dtoverlay=imx219"]
 cm4_config_lines = ["dtoverlay=imx219"]
 pi4_config_lines = ["dtoverlay=imx219"]
 cm5_config_lines = ["dtoverlay=imx219,cam0"]
