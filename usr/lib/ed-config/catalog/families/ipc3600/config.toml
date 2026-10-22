@@ -14,7 +14,6 @@ config_lines = [
   "dtoverlay=sdio-pi5",
   "dtparam=rtc=off",
   "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
-  "enable_uart=1",
   "dtoverlay=spi1-2cs,cs0_spidev=off,cs1_spidev=off",
   "dtoverlay=mcp2515,spi1-0,oscillator=16000000,interrupt=15",
   "dtoverlay=mcp2515,spi1-1,oscillator=16000000,interrupt=14",

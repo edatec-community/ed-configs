@@ -13,7 +13,6 @@ config_lines = [
   "dtoverlay=uart5",
   "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
   "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
-  "enable_uart=1",
   "dtoverlay=spi6-2cs,cs0_spidev=disable,cs1_pin=17,cs1_spidev=disable",
   "dtoverlay=mcp2515,spi6-0,oscillator=16000000,interrupt=15",
 ]
