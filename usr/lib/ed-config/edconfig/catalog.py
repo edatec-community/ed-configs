@@ -30,8 +30,6 @@ def _entries(document: dict[str, Any], key: str, path: Path) -> list[dict[str, A
 
 
 class Catalog:
-    """Validated catalog of exact models and self-contained configuration families."""
-
     _FAMILY_FIELDS = {
         "format",
         "version",
@@ -41,18 +39,24 @@ class Catalog:
         "udev_rules",
         "managed_files",
         "systemd_services",
+        "systemd_service_links",
         "option_config_lines",
         "unsupported_options",
-        "disable_config_on_ubuntu",
         "desktop_config",
         "goodix_touch_devices",
-        "wireplumber_audio_format",
         "wireplumber_modern_file",
+        "wireplumber_modern_target",
         "alsa_config_file",
+        "alsa_config_target",
         "alsa_state_file",
+        "alsa_state_target",
         "alsa_state_blocks",
+        "alsa_restore_skip_ucm_blocks",
+        "wireplumber_legacy_hashes",
         "alsa_profile_set_file",
+        "alsa_profile_set_target",
         "alsa_profile_path_files",
+        "alsa_profile_path_targets",
         "audio_packages",
     }
     _RULE_FIELDS = {"path", "content_file", "default_file", "ubuntu_file", "exact_content"}
@@ -69,9 +73,24 @@ class Catalog:
         ):
             raise ConfigError("unsupported catalog format or version")
 
+        common = self.manifest.get("common")
+        if not isinstance(common, dict):
+            raise ConfigError("catalog common must be a table")
+        disabled_lines = common.get("ubuntu_disabled_lines")
+        if (
+            not isinstance(disabled_lines, list)
+            or not disabled_lines
+            or any(not isinstance(line, str) or not line or "\n" in line for line in disabled_lines)
+            or len(set(disabled_lines)) != len(disabled_lines)
+        ):
+            raise ConfigError("catalog common has invalid ubuntu_disabled_lines")
+        self.ubuntu_disabled_lines = tuple(disabled_lines)
+        self._validate_config_lines("catalog common ubuntu_disabled_lines", disabled_lines)
+
         self.data_paths: set[Path] = {self.manifest_path}
         self.family_directories: dict[str, Path] = {}
         self.systemd_service_targets: dict[str, str] = {}
+        self.systemd_service_links: dict[str, str] = {}
         self.models_path, models = self._load_file("models_file")
         self.options_path, options = self._load_file("options_file")
         self.codes_path, self.codes = self._load_file("codes_file")
@@ -244,6 +263,37 @@ class Catalog:
         if not isinstance(platform, str) or not platform:
             raise ConfigError(f"family package {family_id} must select one platform")
         self._code_value("platforms", platform)
+        path_fields = {
+            "wireplumber_modern_target": "/etc/wireplumber/wireplumber.conf.d",
+            "alsa_config_target": "/etc",
+            "alsa_state_target": "/var/lib/alsa",
+            "alsa_profile_set_target": "/etc/alsa-card-profile/mixer/profile-sets",
+        }
+        for field, directory in path_fields.items():
+            target = family.get(field)
+            if target is not None and (
+                not isinstance(target, str)
+                or Path(target).parent.as_posix() != directory
+                or Path(target).name in {"", ".", ".."}
+            ):
+                raise ConfigError(f"family package {family_id} has unsafe {field}: {target!r}")
+        for source_field, target_fields in {
+            "wireplumber_modern_file": ("wireplumber_modern_target",),
+            "alsa_config_file": ("alsa_config_target",),
+            "alsa_state_file": ("alsa_state_target",),
+            "alsa_profile_set_file": ("alsa_profile_set_target",),
+        }.items():
+            if source_field in family and any(field not in family for field in target_fields):
+                raise ConfigError(f"family package {family_id} is missing target for {source_field}")
+        profile_targets = family.get("alsa_profile_path_targets", [])
+        profile_files = family.get("alsa_profile_path_files", [])
+        if len(profile_targets) != len(profile_files) or any(
+            not isinstance(path, str)
+            or Path(path).parent.as_posix() != "/etc/alsa-card-profile/mixer/paths"
+            or Path(path).name in {"", ".", ".."}
+            for path in profile_targets
+        ):
+            raise ConfigError(f"family package {family_id} has invalid alsa_profile_path_targets")
         lines = family.get("config_lines")
         if not isinstance(lines, list) or not all(
             isinstance(line, str) and line.strip() and "\n" not in line for line in lines
@@ -281,13 +331,8 @@ class Catalog:
             != len(unsupported_options)
         ):
             raise ConfigError(f"family package {family_id} has invalid unsupported_options")
-        disable = family.get("disable_config_on_ubuntu", False)
-        if not isinstance(disable, bool):
-            raise ConfigError(
-                f"family package {family_id} has invalid disable_config_on_ubuntu"
-            )
         desktop = family.get("desktop_config")
-        if desktop is not None and not isinstance(desktop, str):
+        if desktop is not None and desktop != "h101c":
             raise ConfigError(f"family package {family_id} has invalid desktop_config")
         goodix_touch_devices = family.get("goodix_touch_devices", [])
         if (
@@ -303,11 +348,6 @@ class Catalog:
             raise ConfigError(
                 f"family package {family_id} has invalid goodix_touch_devices"
             )
-        if "wireplumber_audio_format" in family:
-            if family["wireplumber_audio_format"] != "S16LE":
-                raise ConfigError(
-                    f"family package {family_id} wireplumber_audio_format must be S16LE"
-                )
         for field in ("alsa_config_file", "alsa_state_file"):
             if field in family:
                 self._rule_file(
@@ -337,6 +377,14 @@ class Catalog:
             raise ConfigError(
                 f"family package {family_id} is missing alsa_state_blocks"
             )
+        if not set(family.get("alsa_restore_skip_ucm_blocks", [])) <= set(family.get("alsa_state_blocks", [])):
+            raise ConfigError(f"family package {family_id} has invalid alsa_restore_skip_ucm_blocks")
+        hashes = family.get("wireplumber_legacy_hashes", [])
+        if not isinstance(hashes, list) or any(
+            not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+            for value in hashes
+        ):
+            raise ConfigError(f"family package {family_id} has invalid wireplumber_legacy_hashes")
         if "alsa_profile_set_file" in family:
             self._rule_file(
                 self.family_directories[family_id.casefold()],
@@ -453,6 +501,17 @@ class Catalog:
             raise ConfigError(
                 f"family package {family_id} systemd_services must name managed service files"
             )
+        service_links = family.get("systemd_service_links", {})
+        if not isinstance(service_links, dict) or set(service_links) != set(services):
+            raise ConfigError(f"family package {family_id} has invalid systemd_service_links")
+        for service, link in service_links.items():
+            expected = f"/etc/systemd/system/{self.systemd_service_targets[service]}.wants/{service}"
+            if link != expected:
+                raise ConfigError(f"family package {family_id} has invalid link for {service}")
+            previous_link = self.systemd_service_links.get(service)
+            if previous_link is not None and previous_link != link:
+                raise ConfigError(f"service {service} has conflicting Family link paths")
+            self.systemd_service_links[service] = link
         rules = family.get("udev_rules", [])
         if not isinstance(rules, list):
             raise ConfigError(f"family package {family_id} udev_rules must be an array")
@@ -814,32 +873,35 @@ class Catalog:
             },
             "options": options,
             "product_code": self._identity_code(model, options),
-            "disable_config_on_ubuntu": bool(
-                family.get("disable_config_on_ubuntu", False)
-            ),
             "screen_config": family.get("desktop_config"),
             "screen_goodix_touch_devices": list(
                 family.get("goodix_touch_devices", [])
             ),
-            "wireplumber_audio_format": family.get("wireplumber_audio_format"),
             "wireplumber_modern": family_text("wireplumber_modern_file"),
+            "wireplumber_modern_target": family.get("wireplumber_modern_target"),
             "alsa_config": family_text("alsa_config_file"),
+            "alsa_config_target": family.get("alsa_config_target"),
             "alsa_state": family_text("alsa_state_file"),
+            "alsa_state_target": family.get("alsa_state_target"),
             "alsa_state_blocks": [
                 str(block) for block in family.get("alsa_state_blocks", [])
             ],
+            "alsa_restore_skip_ucm_blocks": list(family.get("alsa_restore_skip_ucm_blocks", [])),
+            "wireplumber_legacy_hashes": list(family.get("wireplumber_legacy_hashes", [])),
             "alsa_profile_set_file": (
                 str(family["alsa_profile_set_file"])
                 if "alsa_profile_set_file" in family
                 else None
             ),
+            "alsa_profile_set_target": family.get("alsa_profile_set_target"),
             "alsa_profile_set": family_text("alsa_profile_set_file"),
             "alsa_profile_path_files": [
                 {
                     "name": Path(str(path)).name,
+                    "target": family["alsa_profile_path_targets"][index],
                     "content": (package_dir / str(path)).read_text(encoding="utf-8"),
                 }
-                for path in family.get("alsa_profile_path_files", [])
+                for index, path in enumerate(family.get("alsa_profile_path_files", []))
             ],
             "audio_packages": family_path_list("audio_packages"),
             "managed_files": managed_files,
@@ -849,6 +911,7 @@ class Catalog:
                 if service in selected_unit_names
             ],
             "systemd_service_targets": dict(self.systemd_service_targets),
+            "systemd_service_links": dict(self.systemd_service_links),
             "config_lines": lines,
             "rules": rules,
         }
@@ -869,10 +932,34 @@ class Catalog:
             for rule in family.get("udev_rules", [])
         }
 
+    def model_from_product_code(self, product_code: int) -> dict[str, Any] | None:
+        option_mask = 0
+        coded_fields: dict[tuple[int, int], set[int]] = {}
+        for option in self.options.values():
+            if option.get("config_only"):
+                continue
+            if "code_bit" in option:
+                option_mask |= 1 << int(option["code_bit"])
+            else:
+                shift, width, value = (
+                    int(option[key]) for key in ("code_shift", "code_width", "code_value")
+                )
+                option_mask |= ((1 << width) - 1) << shift
+                coded_fields.setdefault((shift, width), {0}).add(value)
+        if any(
+            ((product_code >> shift) & ((1 << width) - 1)) not in allowed
+            for (shift, width), allowed in coded_fields.items()
+        ):
+            return None
+        base_code = product_code & ~option_mask
+        for model in self.models:
+            if self._identity_code(model, []) == base_code:
+                return model
+        return None
+
     def has_wireplumber_config(self) -> bool:
         return any(
-            "wireplumber_audio_format" in family
-            or "wireplumber_modern_file" in family
+            "wireplumber_modern_file" in family
             for family in self.families.values()
         )
 

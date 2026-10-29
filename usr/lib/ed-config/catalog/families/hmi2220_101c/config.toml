@@ -2,7 +2,6 @@ format = "ed-config-family"
 version = 1
 id = "hmi2220_101c"
 platform = "CM4"
-disable_config_on_ubuntu = true
 desktop_config = "h101c"
 
 config_lines = [

@@ -24,8 +24,8 @@ state.rt5616codec {
 	control.3 {
 		iface MIXER
 		name 'HP Playback Volume'
-		value.0 36
-		value.1 36
+		value.0 31
+		value.1 31
 		comment {
 			access 'read write'
 			type INTEGER
@@ -33,8 +33,8 @@ state.rt5616codec {
 			range '0 - 39'
 			dbmin -4650
 			dbmax 1200
-			dbvalue.0 -750
-			dbvalue.1 -750
+			dbvalue.0 0
+			dbvalue.1 0
 		}
 	}
 	control.4 {

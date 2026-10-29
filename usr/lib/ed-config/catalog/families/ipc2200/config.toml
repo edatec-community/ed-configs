@@ -2,7 +2,6 @@ format = "ed-config-family"
 version = 1
 id = "ipc2200"
 platform = "CM4"
-disable_config_on_ubuntu = true
 
 config_lines = [
   "dtparam=i2c_arm=on",

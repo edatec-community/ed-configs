@@ -4,3 +4,6 @@ models_file = "models.toml"
 families_dir = "families"
 options_file = "options.toml"
 codes_file = "hardware/codes.toml"
+
+[common]
+ubuntu_disabled_lines = ["dtparam=i2c_arm=on", "dtparam=spi=on"]

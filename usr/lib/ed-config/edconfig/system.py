@@ -16,19 +16,14 @@ from typing import Any, Iterator
 
 from .catalog import Catalog
 from .errors import ApplyError, ConfigError
+from .screen import managed_paths as screen_managed_paths
 from .screen import operations as screen_operations
 
 
 BEGIN = "# BEGIN EDATEC MANAGED CONFIG"
 END = "# END EDATEC MANAGED CONFIG"
-UBUNTU_DISABLED = {"dtparam=i2c_arm=on", "dtparam=spi=on"}
-WIREPLUMBER_SOURCE = "/usr/share/wireplumber/main.lua.d/50-alsa-config.lua"
-WIREPLUMBER_CONFIG = "/etc/wireplumber/main.lua.d/50-alsa-config.lua"
-WIREPLUMBER_MODERN_CONFIG = "/etc/wireplumber/wireplumber.conf.d/51-ed-config-rt5616.conf"
-ASOUND_CONFIG = "/etc/asound.conf"
-ALSA_STATE = "/var/lib/alsa/asound.state"
-ALSA_PROFILE_SET_DIR = "/etc/alsa-card-profile/mixer/profile-sets"
-ALSA_PROFILE_PATH_DIR = "/etc/alsa-card-profile/mixer/paths"
+BOOT_CONFIG_PATH = "/boot/firmware/config.txt"
+RELEASE_PATH = "/etc/ed-release"
 DPKG = "/usr/bin/dpkg"
 DPKG_DEB = "/usr/bin/dpkg-deb"
 DPKG_QUERY = "/usr/bin/dpkg-query"
@@ -56,13 +51,12 @@ def _read(path: Path) -> str | None:
 def _select_config(root: Path, requested: str | None) -> Path:
     if requested:
         return rooted(root, requested) if Path(requested).is_absolute() else root / requested
-    firmware = root / "boot/firmware/config.txt"
-    legacy = root / "boot/config.txt"
-    if firmware.is_file() or firmware.parent.is_dir():
-        return firmware
-    if legacy.is_file() or legacy.parent.is_dir():
-        return legacy
-    raise ApplyError("cannot locate config.txt; create /boot/firmware or /boot, or pass --config-file")
+    path = rooted(root, BOOT_CONFIG_PATH)
+    if path.is_file() or path.parent.is_dir():
+        return path
+    raise ApplyError(
+        f"cannot locate config.txt at {BOOT_CONFIG_PATH}; pass --config-file to override"
+    )
 
 
 def _detect_ubuntu(root: Path) -> bool:
@@ -76,7 +70,6 @@ def _detect_ubuntu(root: Path) -> bool:
 
 
 def _detect_sata_usb_storage_ids(root: Path) -> list[str]:
-    """Find SATA USB disk VID:PID pairs, matching the old firmware package."""
     lsusb = shutil.which("lsusb")
     udevadm = shutil.which("udevadm")
     if not lsusb or not udevadm:
@@ -153,7 +146,6 @@ def _cmdline_with_usb_storage_quirks(
     previously_managed: set[str],
     desired: set[str],
 ) -> tuple[str, list[str]]:
-    """Update only ed-config-owned quirk entries and retain customer entries."""
     ending_match = re.search(r"[\r\n]*$", current)
     ending = ending_match.group(0) if ending_match else ""
     body = current[: len(current) - len(ending)] if ending else current
@@ -258,8 +250,6 @@ def _active_config_lines(content: str, platform: str) -> set[str]:
 def _config_content(current: str | None, desired: list[str], platform: str) -> str:
     original = current or ""
     before, after, has_block = _split_managed_block(original)
-    # Only the marked block belongs to ed-config. A line matching the catalog
-    # outside that block may have been supplied by the OS or the user.
     existing = _active_config_lines(before + after, platform)
     managed_lines = [line for line in desired if line not in existing]
     managed = "\n".join([BEGIN, *managed_lines, END]) + "\n"
@@ -292,6 +282,19 @@ def _release_content(current: str | None, code: int) -> str:
     return "\n".join(result) + "\n"
 
 
+def _previous_family(catalog: Catalog, root: Path) -> dict[str, Any] | None:
+    content = _read(rooted(root, RELEASE_PATH))
+    if content is None:
+        return None
+    values = [line.partition("=")[2].strip() for line in content.splitlines() if line.startswith("PRODUCT=")]
+    if len(values) != 1 or not re.fullmatch(r"0x[0-9a-fA-F]{8}", values[0]):
+        return None
+    model = catalog.model_from_product_code(int(values[0], 16))
+    if model is None:
+        return None
+    return catalog._family_for_model(model)[1]
+
+
 def _rule_content(rule: dict[str, Any], ubuntu: bool) -> str:
     content = rule.get("ubuntu_content") if ubuntu else None
     if content is None:
@@ -318,26 +321,26 @@ def _catalog_asset_contents(catalog: Catalog, field: str) -> set[str]:
     return contents
 
 
-def _catalog_named_asset_contents(
-    catalog: Catalog, field: str, multiple: bool = False
+def _catalog_target_asset_contents(
+    catalog: Catalog, source_field: str, target_field: str, multiple: bool = False
 ) -> dict[str, set[str]]:
     contents: dict[str, set[str]] = {}
     for family_id, family in catalog.families.items():
-        raw_values = family.get(field, []) if multiple else [family.get(field)]
-        for raw in raw_values:
-            if not isinstance(raw, str):
+        sources = family.get(source_field, []) if multiple else [family.get(source_field)]
+        targets = family.get(target_field, []) if multiple else [family.get(target_field)]
+        for source, target in zip(sources, targets):
+            if not isinstance(source, str) or not isinstance(target, str):
                 continue
-            path = catalog.family_directories[family_id.casefold()] / raw
+            path = catalog.family_directories[family_id.casefold()] / source
             try:
                 content = path.read_text(encoding="utf-8")
             except OSError as exc:
-                raise ConfigError(f"cannot read {field} for family {family_id}: {exc}") from exc
-            contents.setdefault(Path(raw).name, set()).add(content)
+                raise ConfigError(f"cannot read {source_field} for family {family_id}: {exc}") from exc
+            contents.setdefault(target, set()).add(content)
     return contents
 
 
 def _alsa_brace_delta(line: str) -> int:
-    """Count ALSA state braces outside quoted strings and comments."""
     delta = 0
     quote: str | None = None
     escaped = False
@@ -363,7 +366,6 @@ def _alsa_brace_delta(line: str) -> int:
 
 
 def _alsa_state_blocks(content: str) -> dict[str, tuple[int, int]]:
-    """Return top-level ALSA state block spans keyed by card name."""
     blocks: dict[str, tuple[int, int]] = {}
     active_name: str | None = None
     active_start = 0
@@ -395,13 +397,21 @@ def _alsa_state_blocks(content: str) -> dict[str, tuple[int, int]]:
     return blocks
 
 
+def _alsa_block_hashes(content: str | None) -> dict[str, str]:
+    if not content:
+        return {}
+    return {
+        name: hashlib.sha256(content[start:end].rstrip("\r\n").encode("utf-8")).hexdigest()
+        for name, (start, end) in _alsa_state_blocks(content).items()
+    }
+
+
 def _merge_alsa_state(
     current: str | None,
     desired: str,
     selected_names: set[str] | None = None,
     managed_names: set[str] | None = None,
 ) -> str:
-    """Replace selected codec blocks while preserving unrelated card state."""
     desired_blocks = _alsa_state_blocks(desired)
     if not desired_blocks:
         raise ConfigError("ALSA state asset contains no state blocks")
@@ -425,8 +435,6 @@ def _merge_alsa_state(
 
     current_blocks = _alsa_state_blocks(current)
     if not current_blocks:
-        # An unrelated or empty state file has no recognizable ALSA card
-        # blocks to merge. Keep it intact as unmanaged customer content.
         return current
 
     output: list[str] = []
@@ -458,7 +466,6 @@ def _merge_alsa_state(
 
 
 def _remove_alsa_state_blocks(current: str, names: set[str]) -> str:
-    """Remove only blocks owned by ed-config from a global ALSA state file."""
     current_blocks = _alsa_state_blocks(current)
     if not current_blocks:
         return current
@@ -472,14 +479,6 @@ def _remove_alsa_state_blocks(current: str, names: set[str]) -> str:
         cursor = end
     output.append(current[cursor:])
     return "".join(output)
-
-
-def _catalog_field_values(catalog: Catalog, field: str) -> set[str]:
-    return {
-        str(value)
-        for family in catalog.families.values()
-        if isinstance((value := family.get(field)), str)
-    }
 
 
 def _catalog_rule_contents(catalog: Catalog) -> set[str]:
@@ -538,8 +537,6 @@ def _tracked_systemd_services(root: Path, known_services: set[str]) -> set[str]:
     try:
         current = read_status(root).get("current")
     except ConfigError:
-        # Legacy models do not depend on systemd ownership metadata. Preserve
-        # their ability to recover from an invalid state file as before.
         return set()
     if not isinstance(current, dict):
         return set()
@@ -554,64 +551,6 @@ def _symlink_target(path: Path) -> str | None:
         return os.readlink(path) if path.is_symlink() else None
     except OSError:
         return None
-
-
-def _wireplumber_content(root: Path, audio_format: str) -> str | None:
-    """Reproduce the DEB's copy-and-edit of the distro Lua configuration."""
-    source = rooted(root, WIREPLUMBER_SOURCE)
-    content = _read(source)
-    if content is None:
-        return None
-
-    lines = content.splitlines()
-    match_index: int | None = None
-    commented = False
-    for index, line in enumerate(lines):
-        if "audio.format" not in line or not line:
-            continue
-        match_index = index
-        commented = "--" in line
-        if commented:
-            break
-    if match_index is not None:
-        line = lines[match_index]
-        if commented:
-            line = line.replace("--", "  ")
-        lines[match_index] = re.sub(r'= ".*"', f'= "{audio_format}"', line)
-    else:
-        insertion: int | None = None
-        for index, line in enumerate(lines):
-            if "apply_properties = {" in line:
-                insertion = index + 1
-        if insertion is not None:
-            lines.insert(
-                insertion,
-                f'        ["audio.format"]           = "{audio_format}",',
-            )
-    return "\n".join(lines) + "\n"
-
-
-def _modern_wireplumber_content(audio_format: str) -> str:
-    """Configure the Pulse-compatible RT5616 node on WirePlumber 0.5+."""
-    return (
-        "# Managed by ed-config: Debian 13 compatibility for the 3020 audio package.\n"
-        "monitor.alsa.rules = [\n"
-        "  {\n"
-        "    matches = [\n"
-        "      {\n"
-        "        node.name = \"~alsa_output.*\"\n"
-        "        alsa.card_name = \"rt5616-codec\"\n"
-        "      }\n"
-        "    ]\n"
-        "    actions = {\n"
-        "      update-props = {\n"
-        "        priority.session = 1200\n"
-        f'        audio.format = "{audio_format}"\n'
-        "      }\n"
-        "    }\n"
-        "  }\n"
-        "]\n"
-    )
 
 
 def _deb_field(path: Path, field: str) -> str:
@@ -660,26 +599,29 @@ def _install_local_packages(paths: list[str]) -> None:
         ) from exc
 
 
-def _restore_alsa_state() -> None:
-    command = [
-        ALSACTL,
-        "-E",
-        "HOME=/run/alsa",
-        "-E",
-        "XDG_RUNTIME_DIR=/run/alsa/runtime",
-        "restore",
-    ]
-    try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
-    except OSError:
-        raise
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip()
-        raise OSError(detail or "alsactl restore failed") from exc
+def _restore_alsa_state(card_names: list[str], skip_ucm_cards: set[str] | None = None) -> None:
+    for card_name in card_names:
+        command = [ALSACTL]
+        if card_name in (skip_ucm_cards or set()):
+            command.append("-U")
+        command.extend([
+            "-E",
+            "HOME=/run/alsa",
+            "-E",
+            "XDG_RUNTIME_DIR=/run/alsa/runtime",
+            "restore",
+            card_name,
+        ])
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except OSError:
+            raise
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or "").strip()
+            raise OSError(detail or f"alsactl restore failed for {card_name}") from exc
 
 
 def _alsa_state_card_present(root: Path, names: set[str]) -> bool:
-    """Check whether one of the managed ALSA cards is currently enumerated."""
     if not names:
         return False
     proc_asound = root / "proc/asound"
@@ -710,16 +652,14 @@ def build_plan(
         raise ConfigError(f"unsupported OS selection: {os_name}")
     ubuntu = _detect_ubuntu(root) if os_name == "auto" else os_name == "ubuntu"
     config_path = _select_config(root, config_file)
+    previous_family = _previous_family(catalog, root)
     desired = [item["value"] for item in resolution["config_lines"]]
-    if ubuntu and resolution["disable_config_on_ubuntu"]:
-        desired = [line for line in desired if line not in UBUNTU_DISABLED]
+    if ubuntu:
+        disabled = set(catalog.ubuntu_disabled_lines)
+        desired = [line for line in desired if line not in disabled]
 
     operations: list[dict[str, Any]] = []
 
-    # The Pulse ALSA bridge is shipped with the image as an offline asset.  On
-    # the live root, install it only when the exact catalog versions are absent;
-    # never invoke apt or reach the network.  Image-root plans remain
-    # declarative because dpkg must run in the target root's own environment.
     package_paths = [Path(item) for item in resolution.get("audio_packages", [])]
     if root == Path("/") and package_paths:
         missing = [path for path in package_paths if _package_missing(path)]
@@ -776,8 +716,6 @@ def build_plan(
     except ConfigError:
         if ddr_selected:
             raise
-        # A legacy model does not depend on DDR tracking. If an old or
-        # malformed state file cannot be read, leave cmdline.txt untouched.
         previous_usb_quirks = set()
     if detected_usb_storage_quirks is None:
         detected_usb_storage_quirks = (
@@ -817,7 +755,10 @@ def build_plan(
         current = _read(target)
         if current is None or current in managed_rule_contents:
             write_operation("udev", target, _rule_content(rule, ubuntu), 0o644)
-    for path in sorted(catalog.known_rule_paths() - selected_rules):
+    previous_rule_paths = {
+        str(rule["path"]) for rule in previous_family.get("udev_rules", [])
+    } if previous_family is not None else set()
+    for path in sorted(previous_rule_paths - selected_rules):
         target = rooted(root, path)
         if _read(target) in managed_rule_contents:
             operations.append({
@@ -830,7 +771,10 @@ def build_plan(
             })
 
     managed_file_contents = _catalog_managed_file_contents(catalog)
-    previously_managed_files = _tracked_managed_files(root, set(managed_file_contents))
+    previously_managed_files = (
+        _tracked_managed_files(root, set(managed_file_contents))
+        if previous_family is not None else {}
+    )
     managed_files_after: dict[str, str] = {}
     managed_executables: set[str] = set()
 
@@ -846,7 +790,6 @@ def build_plan(
         selected_managed_paths.add(path)
         target = rooted(root, path)
         current = _read(target)
-        # Do not follow or replace customer-created symlinks at managed paths.
         if target.is_symlink():
             continue
         owned_by_ed_config = known_managed_content(path, current)
@@ -913,13 +856,15 @@ def build_plan(
             known_managed_content(unit_path, current) or unit_matches_asset
         ):
             selected_services.add(str(service))
-    known_service_targets = resolution.get("systemd_service_targets", {})
-    known_services = set(known_service_targets)
-    previously_managed_services = _tracked_systemd_services(root, known_services)
+    known_service_links = resolution.get("systemd_service_links", {})
+    known_services = set(known_service_links)
+    previously_managed_services = (
+        _tracked_systemd_services(root, known_services)
+        if previous_family is not None else set()
+    )
     managed_services_after: set[str] = set()
     for service in sorted(selected_services | previously_managed_services):
-        target_name = known_service_targets[service]
-        link_path = f"/etc/systemd/system/{target_name}.wants/{service}"
+        link_path = known_service_links[service]
         target = rooted(root, link_path)
         desired_link = f"/usr/lib/systemd/system/{service}"
         unit_path = f"/usr/lib/systemd/system/{service}"
@@ -956,85 +901,117 @@ def build_plan(
                 "_original_symlink_target": current_link,
             })
 
-    if catalog.has_wireplumber_config():
-        wp_format = resolution.get("wireplumber_audio_format")
-        wp_source = rooted(root, WIREPLUMBER_SOURCE)
-        managed_wireplumber_contents: set[str] = set()
-        if wp_source.is_file():
-            for audio_format in _catalog_field_values(catalog, "wireplumber_audio_format"):
-                content = _wireplumber_content(root, audio_format)
-                if content is not None:
-                    managed_wireplumber_contents.add(content)
-        if wp_source.is_file():
-            # Debian 12/WirePlumber 0.4 uses the distro Lua configuration path.
-            wp_target = rooted(root, WIREPLUMBER_CONFIG)
-            wp_content = (
-                _wireplumber_content(root, str(wp_format))
-                if wp_format is not None
-                else None
-            )
-        else:
-            # Debian 13/WirePlumber 0.5 no longer ships the old Lua path.
-            wp_target = rooted(root, WIREPLUMBER_MODERN_CONFIG)
-            wp_content = (
-                str(resolution.get("wireplumber_modern"))
-                if resolution.get("wireplumber_modern") is not None
-                else _modern_wireplumber_content(str(wp_format))
-                if wp_format is not None
-                else None
-            )
-        # Remove stale files from the earlier experimental hardware profile.
+    modern_target = resolution.get("wireplumber_modern_target")
+    previous_modern_target = (
+        previous_family.get("wireplumber_modern_target")
+        if previous_family is not None
+        else None
+    )
+    if modern_target or previous_modern_target:
+        selected_target = modern_target or previous_modern_target
+        wp_target = rooted(root, selected_target)
+        wp_content = resolution.get("wireplumber_modern")
+        managed_wp = _catalog_asset_contents(catalog, "wireplumber_modern_file")
+        current_wp = _read(wp_target)
+        known_previous_wp = (
+            current_wp is not None
+            and hashlib.sha256(current_wp.encode("utf-8")).hexdigest()
+            in set(resolution.get("wireplumber_legacy_hashes", []))
+        )
         if wp_content is not None:
-            current_wp = _read(wp_target)
-            managed_wp = (
-                managed_wireplumber_contents
-                if wp_target == rooted(root, WIREPLUMBER_CONFIG)
-                else _catalog_asset_contents(catalog, "wireplumber_modern_file")
-            )
-            if current_wp is None or current_wp in managed_wp:
+            if current_wp is None or current_wp in managed_wp or known_previous_wp:
                 write_operation("wireplumber", wp_target, str(wp_content), 0o644)
-        if (
-            wp_target == rooted(root, WIREPLUMBER_MODERN_CONFIG)
-            and wp_content is None
-            and _read(wp_target)
-            in _catalog_asset_contents(catalog, "wireplumber_modern_file")
-        ):
+        elif previous_modern_target == selected_target and current_wp in managed_wp:
             operations.append({
                 "kind": "wireplumber",
                 "action": "delete",
-                "path": WIREPLUMBER_MODERN_CONFIG,
+                "path": selected_target,
                 "changed": True,
                 "_target": wp_target,
-                "_original": _read(wp_target),
+                "_original": current_wp,
             })
+        if (
+            previous_modern_target
+            and previous_modern_target != modern_target
+            and previous_family is not None
+        ):
+            old_target = rooted(root, previous_modern_target)
+            old_content = _read(old_target)
+            old_asset = (
+                catalog.family_directories[str(previous_family["id"]).casefold()]
+                / str(previous_family["wireplumber_modern_file"])
+            )
+            old_known = old_asset.read_text(encoding="utf-8")
+            if old_content is not None and old_content == old_known:
+                operations.append({
+                    "kind": "wireplumber",
+                    "action": "delete",
+                    "path": previous_modern_target,
+                    "changed": True,
+                    "_target": old_target,
+                    "_original": old_content,
+                })
     alsa_restore_needed = False
-    if catalog.has_alsa_config():
-        asound_target = rooted(root, ASOUND_CONFIG)
+    if resolution.get("alsa_config_target") or (
+        previous_family is not None and previous_family.get("alsa_config_target")
+    ):
+        asound_path = resolution.get("alsa_config_target") or previous_family["alsa_config_target"]
+        asound_target = rooted(root, asound_path)
         asound_content = resolution.get("alsa_config")
         managed_asound = _catalog_asset_contents(catalog, "alsa_config_file")
         current_asound = _read(asound_target)
         if asound_content:
             if current_asound is None or current_asound in managed_asound:
                 write_operation("alsa_config", asound_target, str(asound_content), 0o644)
-        elif current_asound in managed_asound:
+        elif previous_family is not None and current_asound in managed_asound:
             operations.append({
                 "kind": "alsa_config",
                 "action": "delete",
-                "path": ASOUND_CONFIG,
+                "path": asound_path,
                 "changed": True,
                 "_target": asound_target,
                 "_original": _read(asound_target),
             })
+        if previous_family is not None:
+            old_path = previous_family.get("alsa_config_target")
+            if old_path and old_path != asound_path:
+                old_target = rooted(root, old_path)
+                old_content = _read(old_target)
+                if old_content in managed_asound:
+                    operations.append({
+                        "kind": "alsa_config", "action": "delete", "path": old_path,
+                        "changed": True, "_target": old_target, "_original": old_content,
+                    })
 
-    if catalog.has_alsa_config():
-        state_target = rooted(root, ALSA_STATE)
+    if resolution.get("alsa_state_target") or (
+        previous_family is not None and previous_family.get("alsa_state_target")
+    ):
+        state_path = resolution.get("alsa_state_target") or previous_family["alsa_state_target"]
+        state_target = rooted(root, state_path)
         state_content = resolution.get("alsa_state")
-        managed_names = {
-            str(block)
-            for family in catalog.families.values()
-            for block in family.get("alsa_state_blocks", [])
-        }
         current_state = _read(state_target)
+        managed_names = {str(block) for block in resolution.get("alsa_state_blocks", [])}
+        removable_old_names: set[str] = set()
+        if previous_family is not None and current_state is not None:
+            try:
+                previous_current = read_status(root).get("current") or {}
+            except ConfigError:
+                previous_current = {}
+            recorded_hashes = previous_current.get("managed_alsa_blocks", {})
+            if not isinstance(recorded_hashes, dict):
+                recorded_hashes = {}
+            old_asset = catalog.family_directories[str(previous_family["id"]).casefold()] / str(
+                previous_family.get("alsa_state_file", "")
+            )
+            old_asset_hashes = _alsa_block_hashes(old_asset.read_text(encoding="utf-8")) if old_asset.is_file() else {}
+            current_hashes = _alsa_block_hashes(current_state)
+            removable_old_names = {
+                str(name) for name in previous_family.get("alsa_state_blocks", [])
+                if current_hashes.get(str(name)) in {
+                    recorded_hashes.get(str(name)), old_asset_hashes.get(str(name))
+                }
+            }
+            managed_names.update(removable_old_names)
         if state_content:
             selected_names = {
                 str(block) for block in resolution.get("alsa_state_blocks", [])
@@ -1048,8 +1025,8 @@ def build_plan(
             if current_state != merged_state:
                 write_operation("alsa", state_target, merged_state, 0o644)
                 alsa_restore_needed = True
-        elif current_state is not None:
-            remaining_state = _remove_alsa_state_blocks(current_state, managed_names)
+        elif current_state is not None and previous_family is not None:
+            remaining_state = _remove_alsa_state_blocks(current_state, removable_old_names)
             if remaining_state != current_state:
                 if remaining_state.strip():
                     write_operation("alsa", state_target, remaining_state, 0o644)
@@ -1057,91 +1034,115 @@ def build_plan(
                     operations.append({
                         "kind": "alsa",
                         "action": "delete",
-                        "path": ALSA_STATE,
+                        "path": state_path,
                         "changed": True,
                         "_target": state_target,
                         "_original": current_state,
                     })
                 alsa_restore_needed = True
+        if previous_family is not None:
+            old_path = previous_family.get("alsa_state_target")
+            if old_path and old_path != state_path:
+                old_target = rooted(root, old_path)
+                old_content = _read(old_target)
+                if old_content is not None:
+                    try:
+                        old_status = read_status(root).get("current") or {}
+                    except ConfigError:
+                        old_status = {}
+                    old_recorded = old_status.get("managed_alsa_blocks", {})
+                    if not isinstance(old_recorded, dict):
+                        old_recorded = {}
+                    old_asset = catalog.family_directories[str(previous_family["id"]).casefold()] / str(
+                        previous_family.get("alsa_state_file", "")
+                    )
+                    old_asset_hashes = _alsa_block_hashes(old_asset.read_text(encoding="utf-8")) if old_asset.is_file() else {}
+                    old_current_hashes = _alsa_block_hashes(old_content)
+                    safe_names = {
+                        str(name) for name in previous_family.get("alsa_state_blocks", [])
+                        if old_current_hashes.get(str(name)) in {
+                            old_recorded.get(str(name)), old_asset_hashes.get(str(name))
+                        }
+                    }
+                    remaining = _remove_alsa_state_blocks(
+                        old_content, safe_names
+                    )
+                    if remaining != old_content:
+                        if remaining.strip():
+                            write_operation("alsa", old_target, remaining, 0o644)
+                        else:
+                            operations.append({
+                                "kind": "alsa", "action": "delete", "path": old_path,
+                                "changed": True, "_target": old_target, "_original": old_content,
+                            })
 
-    managed_profile_sets = _catalog_named_asset_contents(
-        catalog, "alsa_profile_set_file"
+    managed_profile_sets = _catalog_target_asset_contents(
+        catalog, "alsa_profile_set_file", "alsa_profile_set_target"
     )
-    managed_profile_paths = _catalog_named_asset_contents(
-        catalog, "alsa_profile_path_files", multiple=True
+    managed_profile_paths = _catalog_target_asset_contents(
+        catalog, "alsa_profile_path_files", "alsa_profile_path_targets", multiple=True
     )
-    selected_profile_set_file = resolution.get("alsa_profile_set_file")
-    selected_profile_set_name = (
-        Path(str(selected_profile_set_file)).name
-        if selected_profile_set_file
-        else None
-    )
+    selected_profile_set_path = resolution.get("alsa_profile_set_target")
     selected_profile_set = resolution.get("alsa_profile_set")
-    if selected_profile_set_name and isinstance(selected_profile_set, str):
-        profile_target = rooted(
-            root, f"{ALSA_PROFILE_SET_DIR}/{selected_profile_set_name}"
-        )
+    if selected_profile_set_path and isinstance(selected_profile_set, str):
+        profile_target = rooted(root, selected_profile_set_path)
         current_profile = _read(profile_target)
         if current_profile is None or current_profile in managed_profile_sets.get(
-            selected_profile_set_name, set()
+            selected_profile_set_path, set()
         ):
             write_operation("alsa_profile", profile_target, selected_profile_set, 0o644)
-    for name, managed in managed_profile_sets.items():
-        if name == selected_profile_set_name:
+    for path, managed in managed_profile_sets.items():
+        if previous_family is None or path != previous_family.get("alsa_profile_set_target"):
             continue
-        profile_target = rooted(root, f"{ALSA_PROFILE_SET_DIR}/{name}")
+        if path == selected_profile_set_path:
+            continue
+        profile_target = rooted(root, path)
         if _read(profile_target) in managed:
             operations.append({
                 "kind": "alsa_profile",
                 "action": "delete",
-                "path": f"{ALSA_PROFILE_SET_DIR}/{name}",
+                "path": path,
                 "changed": True,
                 "_target": profile_target,
                 "_original": _read(profile_target),
             })
 
-    selected_profile_path_names: set[str] = set()
+    selected_profile_paths: set[str] = set()
     for profile_path in resolution.get("alsa_profile_path_files", []):
         if not isinstance(profile_path, dict):
             continue
-        name = Path(str(profile_path.get("name", ""))).name
+        path = str(profile_path.get("target", ""))
         content = profile_path.get("content")
-        if not name or not isinstance(content, str):
+        if not path or not isinstance(content, str):
             continue
-        selected_profile_path_names.add(name)
-        path_target = rooted(root, f"{ALSA_PROFILE_PATH_DIR}/{name}")
+        selected_profile_paths.add(path)
+        path_target = rooted(root, path)
         current_path = _read(path_target)
-        if current_path is None or current_path in managed_profile_paths.get(name, set()):
+        if current_path is None or current_path in managed_profile_paths.get(path, set()):
             write_operation("alsa_profile", path_target, content, 0o644)
-    for name, managed in managed_profile_paths.items():
-        if name in selected_profile_path_names:
+    for path, managed in managed_profile_paths.items():
+        if previous_family is None or path not in previous_family.get("alsa_profile_path_targets", []):
             continue
-        path_target = rooted(root, f"{ALSA_PROFILE_PATH_DIR}/{name}")
+        if path in selected_profile_paths:
+            continue
+        path_target = rooted(root, path)
         if _read(path_target) in managed:
             operations.append({
                 "kind": "alsa_profile",
                 "action": "delete",
-                "path": f"{ALSA_PROFILE_PATH_DIR}/{name}",
+                "path": path,
                 "changed": True,
                 "_target": path_target,
                 "_original": _read(path_target),
             })
 
-    config_changed = any(
-        operation["changed"] and operation["kind"] == "config"
-        for operation in operations
-    )
     selected_alsa_blocks = {
         str(block) for block in resolution.get("alsa_state_blocks", [])
     }
-    # A newly written config.txt cannot enable the codec until the next boot.
-    # Do not run alsactl against a state file whose managed card is not yet
-    # enumerated; the state file is already staged for alsa-restore.service.
     alsa_card_ready = _alsa_state_card_present(root, selected_alsa_blocks)
     if (
         alsa_restore_needed
         and root == Path("/")
-        and not config_changed
         and alsa_card_ready
         and Path(ALSACTL).is_file()
         and (root / "dev/snd").is_dir()
@@ -1149,19 +1150,74 @@ def build_plan(
         operations.append({
             "kind": "alsa_restore",
             "action": "restore",
-            "path": ALSA_STATE,
+            "path": state_path,
             "changed": True,
             "_target": None,
+            "_cards": sorted(selected_alsa_blocks),
+            "_skip_ucm_cards": sorted(resolution.get("alsa_restore_skip_ucm_blocks", [])),
         })
+
+    previous_screen_files: dict[str, dict[str, Any]] = {}
+    restorable_screen: dict[str, str | None] = {}
+    dirty_screen_paths: set[str] = set()
+    if previous_family is not None and previous_family.get("desktop_config"):
+        try:
+            previous_status = read_status(root).get("current") or {}
+        except ConfigError:
+            previous_status = {}
+        raw_files = previous_status.get("managed_screen_files", {})
+        if isinstance(raw_files, dict):
+            allowed = screen_managed_paths(root)
+            for path, item in raw_files.items():
+                if path not in allowed or not isinstance(item, dict):
+                    continue
+                digest = item.get("applied_sha256")
+                if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                    continue
+                if item.get("original_absent") is True:
+                    original = None
+                else:
+                    backup_path = item.get("original_backup")
+                    backup_digest = item.get("original_sha256")
+                    if (
+                        not isinstance(backup_path, str)
+                        or not backup_path.startswith("/var/lib/ed-config/backups/")
+                        or not isinstance(backup_digest, str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", backup_digest)
+                    ):
+                        continue
+                    original = _read(rooted(root, backup_path))
+                    if original is None or hashlib.sha256(original.encode("utf-8")).hexdigest() != backup_digest:
+                        continue
+                target = rooted(root, path)
+                current = _read(target)
+                if current is not None and hashlib.sha256(current.encode("utf-8")).hexdigest() == digest:
+                    previous_screen_files[str(target)] = item
+                    restorable_screen[str(target)] = original
+                else:
+                    dirty_screen_paths.add(str(target))
 
     screen_changes = []
     if resolution.get("screen_config") is not None:
         screen_changes = screen_operations(
             root,
             resolution["identity"]["platform"],
-            resolution.get("screen_config"),
             resolution.get("screen_goodix_touch_devices") or None,
+            restorable_screen,
         )
+    selected_screen_paths = {str(operation["path"]) for operation in screen_changes}
+    for path, original in restorable_screen.items():
+        if path in selected_screen_paths:
+            continue
+        target = Path(path)
+        if original is None:
+            operations.append({
+                "kind": "screen", "action": "delete",
+                "path": "/" + target.relative_to(root).as_posix(),
+                "changed": True, "_target": target, "_original": _read(target),
+            })
+        else:
+            write_operation("screen", target, original)
     for operation in screen_changes:
         write_operation(
             str(operation["kind"]),
@@ -1171,8 +1227,7 @@ def build_plan(
             operation.get("uid"),
             operation.get("gid"),
         )
-
-    release = root / "etc/ed-release"
+    release = rooted(root, RELEASE_PATH)
     write_operation("release", release, _release_content(_read(release), resolution["product_code"]), 0o644)
 
     return {
@@ -1193,6 +1248,9 @@ def build_plan(
         "_managed_usb_storage_quirks": sorted(managed_usb_quirks),
         "_managed_file_hashes": dict(sorted(managed_files_after.items())),
         "_managed_systemd_services": sorted(managed_services_after),
+        "_screen_paths": sorted(selected_screen_paths),
+        "_previous_screen_files": previous_screen_files,
+        "_dirty_screen_paths": sorted(dirty_screen_paths),
         "_resolution": resolution,
     }
 
@@ -1303,9 +1361,7 @@ def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
 def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
     root = Path(plan["root"])
     with _lock(root):
-        _backup(root, plan["operations"])
-        # ed-release is the commit marker consumed by the separate EEPROM
-        # writer, so it is deliberately applied after config and udev files.
+        backup_dir = _backup(root, plan["operations"])
         ordered = sorted(plan["operations"], key=lambda op: op["kind"] == "release")
         completed: list[dict[str, Any]] = []
         try:
@@ -1317,7 +1373,7 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     completed.append(operation)
                     continue
                 if operation["kind"] == "alsa_restore":
-                    _restore_alsa_state()
+                    _restore_alsa_state(operation["_cards"], set(operation.get("_skip_ucm_cards", [])))
                     completed.append(operation)
                     continue
                 target: Path = operation["_target"]
@@ -1400,6 +1456,46 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
         managed_services = plan.get("_managed_systemd_services", [])
         if managed_services:
             state["current"]["managed_systemd_services"] = managed_services
+        screen_paths = set(plan.get("_screen_paths", []))
+        previous_screen_files = plan.get("_previous_screen_files", {})
+        dirty_screen_paths = set(plan.get("_dirty_screen_paths", []))
+        screen_files = {}
+        for operation in plan["operations"]:
+            if operation["kind"] != "screen" or operation["action"] != "write":
+                continue
+            target_path = str(operation["_target"])
+            if target_path not in screen_paths or target_path in dirty_screen_paths:
+                continue
+            content = operation["_content"]
+            old = previous_screen_files.get(target_path, {})
+            if old:
+                entry = dict(old)
+            elif operation["_original"] is None:
+                entry = {"original_absent": True}
+            elif backup_dir is not None and operation["changed"]:
+                source = backup_dir / operation["_target"].relative_to(root)
+                entry = {
+                    "original_backup": "/" + source.relative_to(root).as_posix(),
+                    "original_sha256": hashlib.sha256(operation["_original"].encode("utf-8")).hexdigest(),
+                }
+            else:
+                continue
+            entry["applied_sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            screen_files["/" + operation["_target"].relative_to(root).as_posix()] = entry
+        if screen_files:
+            state["current"]["managed_screen_files"] = screen_files
+        resolution = plan["_resolution"]
+        alsa_target = resolution.get("alsa_state_target")
+        if alsa_target and resolution.get("alsa_state"):
+            actual_hashes = _alsa_block_hashes(_read(rooted(root, alsa_target)))
+            desired_hashes = _alsa_block_hashes(resolution["alsa_state"])
+            owned_blocks = {
+                name: actual_hashes[name]
+                for name in resolution.get("alsa_state_blocks", [])
+                if actual_hashes.get(name) == desired_hashes.get(name)
+            }
+            if owned_blocks:
+                state["current"]["managed_alsa_blocks"] = owned_blocks
         state_path = root / "var/lib/ed-config/state.json"
         _atomic_write(state_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n", 0o644)
         return {
@@ -1473,5 +1569,4 @@ def record_apply_failure(root: Path, requested_model: str, error: str) -> None:
         path = root / "var/lib/ed-config/state.json"
         _atomic_write(path, json.dumps(state, indent=2, ensure_ascii=False) + "\n", 0o644)
     except (ConfigError, OSError):
-        # Failure reporting must never replace the original apply error.
         return

@@ -6,50 +6,70 @@ from pathlib import Path
 from .errors import ApplyError
 
 
-DISPLAY_BEGIN = "# BEGIN ed-config HMI101C display configuration"
-DISPLAY_END = "# END ed-config HMI101C display configuration"
-H101C_COMMON_TOUCH_DEVICES = (
-    "generic ft5x06 (79)",
-    "generic ft5x06 (80)",
-    "FT5406 memory based driver",
-)
-H101C_DEFAULT_GOODIX_TOUCH_DEVICES = (
-    "10-0014 Goodix Capacitive TouchScreen",
-)
-H101C_UNPREFIXED_GOODIX_TOUCH_DEVICE = "Goodix Capacitive TouchScreen"
-WAYFIRE_DESKTOP_SHORTCUTS = (
-    "repeatable_binding_volume_up = KEY_VOLUMEUP\n"
-    "command_volume_up = wfpanelctl volumepulse volu\n"
-    "repeatable_binding_volume_down = KEY_VOLUMEDOWN\n"
-    "command_volume_down = wfpanelctl volumepulse vold\n"
-    "binding_mute = KEY_MUTE\n"
-    "command_mute = wfpanelctl volumepulse mute\n"
-    "binding_menu = <super>\n"
-    "command_menu = wfpanelctl smenu menu\n"
-    "binding_terminal = <ctrl> <alt> KEY_T\n"
-    "command_terminal = lxterminal\n"
-    "binding_bluetooth = <ctrl> <alt> KEY_B\n"
-    "command_bluetooth = wfpanelctl bluetooth menu\n"
-    "binding_netman = <ctrl> <alt> KEY_W\n"
-    "command_netman = wfpanelctl netman menu\n"
-    "binding_grim = KEY_SYSRQ\n"
-    "command_grim = grim\n"
-    "binding_orca = <ctrl> <alt> KEY_SPACE\n"
-    "command_orca = gui-pkinst orca reboot\n"
-    "binding_quit = <ctrl> <alt> KEY_DELETE\n"
-    "command_quit = lxde-pi-shutdown-helper\n"
-    "binding_power = KEY_POWER\n"
-    "command_power = pwrkey"
-)
-WAYFIRE_KEYBOARD_LAYOUT = "xkb_model = pc105\nxkb_layout = gb\nxkb_variant ="
-WAYFIRE_LXTERMINAL_RULE = 'on created if title is "LXTerminal" then maximize'
+_H101C_SETTINGS = {
+    "desktop_name": "HMI101C",
+    "desktop_mode": "800x1280@40000",
+    "desktop_kanshi_mode": "800x1280",
+    "desktop_transform": "90",
+    "desktop_hdmi_output": "HDMI-A-1",
+    "desktop_hdmi_position": "1280,0",
+    "desktop_touch_devices": [
+        "generic ft5x06 (79)",
+        "generic ft5x06 (80)",
+        "FT5406 memory based driver",
+    ],
+    "desktop_default_goodix": ["10-0014 Goodix Capacitive TouchScreen"],
+    "desktop_unprefixed_goodix": "Goodix Capacitive TouchScreen",
+    "desktop_shortcuts": "\n".join((
+        "repeatable_binding_volume_up = KEY_VOLUMEUP",
+        "command_volume_up = wfpanelctl volumepulse volu",
+        "repeatable_binding_volume_down = KEY_VOLUMEDOWN",
+        "command_volume_down = wfpanelctl volumepulse vold",
+        "binding_mute = KEY_MUTE",
+        "command_mute = wfpanelctl volumepulse mute",
+        "binding_menu = <super>",
+        "command_menu = wfpanelctl smenu menu",
+        "binding_terminal = <ctrl> <alt> KEY_T",
+        "command_terminal = lxterminal",
+        "binding_bluetooth = <ctrl> <alt> KEY_B",
+        "command_bluetooth = wfpanelctl bluetooth menu",
+        "binding_netman = <ctrl> <alt> KEY_W",
+        "command_netman = wfpanelctl netman menu",
+        "binding_grim = KEY_SYSRQ",
+        "command_grim = grim",
+        "binding_orca = <ctrl> <alt> KEY_SPACE",
+        "command_orca = gui-pkinst orca reboot",
+        "binding_quit = <ctrl> <alt> KEY_DELETE",
+        "command_quit = lxde-pi-shutdown-helper",
+        "binding_power = KEY_POWER",
+        "command_power = pwrkey",
+    )),
+    "desktop_keyboard": "\n".join((
+        "xkb_model = pc105",
+        "xkb_layout = gb",
+        "xkb_variant =",
+    )),
+    "desktop_window_rule": "on created if title is \"LXTerminal\" then maximize",
+    "desktop_window_rule_label": "LXTerminal maximize",
+    "desktop_legacy_labwc_window_label": "LXTerminal rule",
+    "desktop_wayfire_path": ".config/wayfire.ini",
+    "desktop_kanshi_path": ".config/kanshi/config",
+    "desktop_labwc_path": ".config/labwc/rc.xml",
+    "desktop_autostart_path": "/etc/xdg/labwc/autostart",
+}
+_H101C_DSI_OUTPUTS = {
+    "PI4": "DSI-1",
+    "CM4": "DSI-1",
+    "PI5": "DSI-2",
+    "CM5": "DSI-2",
+}
 
 
 def _block(
     current: str,
     body: str,
-    begin: str = DISPLAY_BEGIN,
-    end: str = DISPLAY_END,
+    begin: str,
+    end: str,
 ) -> str:
     block = f"{begin}\n{body}\n{end}"
     if begin in current:
@@ -243,23 +263,6 @@ def _labwc(current: str, dsi: str, touches: list[str]) -> str:
     raise ApplyError("labwc rc.xml has no supported root closing tag")
 
 
-def _labwc_touch_block(current: str, dsi: str, touches: list[str]) -> str:
-    current = _remove_labwc_managed_block(current, "HMI101C touch mapping")
-    if not touches:
-        return current
-    begin = "<!-- BEGIN ed-config HMI101C touch mapping -->"
-    end = "<!-- END ed-config HMI101C touch mapping -->"
-    block = begin + "\n" + "".join(
-        f'    <touch deviceName="{touch}" mapToOutput="{dsi}" mouseEmulation="yes"/>\n'
-        for touch in touches
-    ) + end + "\n"
-    for root_close in ("</openbox_config>", "</labwc_config>"):
-        index = current.rfind(root_close)
-        if index >= 0:
-            return current[:index] + block + current[index:]
-    raise ApplyError("labwc rc.xml has no supported root closing tag")
-
-
 def _remove_labwc_managed_block(current: str, name: str) -> str:
     begin = f"<!-- BEGIN ed-config {name} -->"
     end = f"<!-- END ed-config {name} -->"
@@ -275,30 +278,6 @@ def _remove_labwc_managed_block(current: str, name: str) -> str:
     if remaining.search(current):
         raise ApplyError(f"malformed ed-config Labwc {name} block")
     return current
-
-
-def _labwc_window_rule(current: str, enabled: bool) -> str:
-    current = _remove_labwc_managed_block(current, "HMI101C LXTerminal rule")
-    if not enabled:
-        return current
-    begin = "<!-- BEGIN ed-config HMI101C LXTerminal rule -->"
-    end = "<!-- END ed-config HMI101C LXTerminal rule -->"
-    block = (
-        f"  {begin}\n"
-        '    <windowRule identifier="LXTerminal"><action name="Maximize" /></windowRule>\n'
-        f"  {end}\n"
-    )
-    closing = "</windowRules>"
-    index = current.rfind(closing)
-    if index >= 0:
-        line_start = current.rfind("\n", 0, index) + 1
-        return current[:line_start] + block + current[line_start:]
-    for root_close in ("</openbox_config>", "</labwc_config>"):
-        index = current.rfind(root_close)
-        if index >= 0:
-            section = f"  <windowRules>\n{block}  </windowRules>\n"
-            return current[:index] + section + current[index:]
-    raise ApplyError("labwc rc.xml has no supported root closing tag")
 
 
 def _squeekboard(current: str, dsi: str) -> str:
@@ -317,48 +296,32 @@ def _squeekboard(current: str, dsi: str) -> str:
     return "\n".join(result) + "\n"
 
 
-DISPLAY_SETUP = '''#!/bin/sh
-
-D_DSI=$(xrandr | awk '/^DSI.* connected/ {print $1; exit}')
-D_HDMI=$(xrandr | awk '/^HDMI.* connected/ {print $1; exit}')
-D_TOUCH=$(xinput | awk -F'id=' '/Goodix Capacitive TouchScreen/ && /pointer/ {gsub(/^.*↳ /,"",$1); sub(/[ \\t]+$/,"",$1); print $1; exit}')
-
-if [ -n "$D_DSI" ]; then
-    if [ -n "$D_HDMI" ] && xrandr --output "$D_HDMI" --auto --pos 1280x0 --output "$D_DSI" --primary --mode 800x1280 --pos 0x0 --rotate left --dryrun; then
-        xrandr --output "$D_HDMI" --auto --pos 1280x0 --output "$D_DSI" --primary --mode 800x1280 --pos 0x0 --rotate left
-    elif xrandr --output "$D_DSI" --primary --mode 800x1280 --pos 0x0 --rotate left --dryrun; then
-        xrandr --output "$D_DSI" --primary --mode 800x1280 --pos 0x0 --rotate left
-    fi
-    if [ -n "$D_TOUCH" ]; then
-        xinput --map-to-output "$D_TOUCH" "$D_DSI"
-    fi
-fi
-
-if [ -e /usr/share/ovscsetup.sh ]; then
-    /usr/share/ovscsetup.sh
-fi
-exit 0
-'''
-
-
 def operations(
     root: Path,
     platform: str,
-    profile: str,
     configured_goodix_touches: list[str] | None = None,
+    original_contents: dict[str, str | None] | None = None,
 ) -> list[dict[str, object]]:
-    if profile != "h101c":
-        raise ApplyError(f"unsupported desktop configuration profile: {profile}")
-    dsi = "DSI-1" if platform.casefold() in {"cm4", "pi4"} else "DSI-2"
+    def source_text(path: Path) -> str:
+        if original_contents is not None and str(path) in original_contents:
+            return original_contents[str(path)] or ""
+        return _text(path)
+
+    settings = _H101C_SETTINGS
+    try:
+        dsi = _H101C_DSI_OUTPUTS[platform]
+    except KeyError as exc:
+        raise ApplyError(f"unsupported H101C platform: {platform}") from exc
+    name = str(settings["desktop_name"])
     goodix_touches = (
-        [H101C_UNPREFIXED_GOODIX_TOUCH_DEVICE, *configured_goodix_touches]
+        [str(settings["desktop_unprefixed_goodix"]), *configured_goodix_touches]
         if configured_goodix_touches is not None
         else [
-            H101C_UNPREFIXED_GOODIX_TOUCH_DEVICE,
-            *H101C_DEFAULT_GOODIX_TOUCH_DEVICES,
+            str(settings["desktop_unprefixed_goodix"]),
+            *settings["desktop_default_goodix"],
         ]
     )
-    wayfire_touches = [*H101C_COMMON_TOUCH_DEVICES, *goodix_touches]
+    wayfire_touches = [*settings["desktop_touch_devices"], *goodix_touches]
     labwc_touches = list(goodix_touches)
 
     result: list[dict[str, object]] = []
@@ -366,68 +329,70 @@ def operations(
     if home_root.is_dir():
         for home in sorted(path for path in home_root.iterdir() if path.is_dir()):
             owner = home.stat()
-            config = home / ".config"
-            wayfire = config / "wayfire.ini"
-            current_wayfire = _text(wayfire)
-            kanshi = config / "kanshi/config"
-            current_kanshi = _text(kanshi)
+            wayfire = home / str(settings["desktop_wayfire_path"])
+            current_wayfire = source_text(wayfire)
+            kanshi = home / str(settings["desktop_kanshi_path"])
+            current_kanshi = source_text(kanshi)
             wayfire_body = (
-                f"[output:{dsi}]\nmode = 800x1280@40000\nposition = 0,0\ntransform = 90\nprimary = true\n"
+                f"[output:{dsi}]\nmode = {settings['desktop_mode']}\nposition = 0,0\ntransform = {settings['desktop_transform']}\nprimary = true\n"
                 + "\n".join(
                     f"[input-device:{touch}]\noutput = {dsi}" for touch in wayfire_touches
                 )
             )
-            current_wayfire = _block(current_wayfire, wayfire_body)
+            marker_begin = f"# BEGIN ed-config {name} display configuration"
+            marker_end = f"# END ed-config {name} display configuration"
+            current_wayfire = _block(current_wayfire, wayfire_body, marker_begin, marker_end)
 
-            name = "HMI101C"
             current_wayfire = _managed_ini_section(
                 current_wayfire,
                 "command",
                 f"{name} desktop shortcuts",
-                WAYFIRE_DESKTOP_SHORTCUTS,
+                str(settings["desktop_shortcuts"]),
                 preserve_existing=True,
             )
             current_wayfire = _managed_ini_section(
                 current_wayfire,
                 "input",
                 f"{name} keyboard layout",
-                WAYFIRE_KEYBOARD_LAYOUT,
+                str(settings["desktop_keyboard"]),
                 preserve_existing=True,
             )
-            rule_name = f"{name} LXTerminal maximize"
+            rule_name = f"{name} {settings['desktop_window_rule_label']}"
             current_wayfire = _managed_ini_section(
                 current_wayfire, "window-rules", rule_name, None
             )
-            if not _has_window_rule(current_wayfire, WAYFIRE_LXTERMINAL_RULE):
+            window_rule = str(settings["desktop_window_rule"])
+            if not _has_window_rule(current_wayfire, window_rule):
                 rule_key = _window_rule_key(current_wayfire, rule_name)
                 current_wayfire = _managed_ini_section(
                     current_wayfire,
                     "window-rules",
                     rule_name,
-                    f"{rule_key} = {WAYFIRE_LXTERMINAL_RULE}",
+                    f"{rule_key} = {window_rule}",
                 )
 
             kanshi_body = (
-                f"profile {{\n        output {dsi} mode 800x1280 position 0,0 transform 90\n}}\n"
-                f"profile {{\n        output {dsi} mode 800x1280 position 0,0 transform 90\n"
-                "        output HDMI-A-1 enable position 1280,0 transform normal\n}"
+                f"profile {{\n        output {dsi} mode {settings['desktop_kanshi_mode']} position 0,0 transform {settings['desktop_transform']}\n}}\n"
+                f"profile {{\n        output {dsi} mode {settings['desktop_kanshi_mode']} position 0,0 transform {settings['desktop_transform']}\n"
+                f"        output {settings['desktop_hdmi_output']} enable position {settings['desktop_hdmi_position']} transform normal\n}}"
             )
             result.extend([
-                {"kind": "screen", "path": kanshi, "content": _block(current_kanshi, kanshi_body), "mode": 0o644, "uid": owner.st_uid, "gid": owner.st_gid},
+                {"kind": "screen", "path": kanshi, "content": _block(current_kanshi, kanshi_body, marker_begin, marker_end), "mode": 0o644, "uid": owner.st_uid, "gid": owner.st_gid},
             ])
 
             result.append({"kind": "screen", "path": wayfire, "content": current_wayfire, "mode": 0o644, "uid": owner.st_uid, "gid": owner.st_gid})
-            labwc = config / "labwc/rc.xml"
-            current_labwc = _text(labwc)
-            labwc_base = _labwc_touch_block(current_labwc, dsi, []) if current_labwc else current_labwc
+            labwc = home / str(settings["desktop_labwc_path"])
+            current_labwc = source_text(labwc)
+            labwc_base = _remove_labwc_managed_block(current_labwc, f"{name} touch mapping") if current_labwc else current_labwc
             labwc_content = _labwc(labwc_base, dsi, labwc_touches)
-            labwc_content = _labwc_window_rule(labwc_content, False)
+            labwc_content = _remove_labwc_managed_block(
+                labwc_content, f"{name} {settings['desktop_legacy_labwc_window_label']}"
+            )
             result.append({"kind": "screen", "path": labwc, "content": labwc_content, "mode": 0o644, "uid": owner.st_uid, "gid": owner.st_gid})
 
-    autostart = root / "etc/xdg/labwc/autostart"
+    autostart = root.joinpath(*Path(str(settings["desktop_autostart_path"])).parts[1:])
     if autostart.is_file():
-        result.append({"kind": "screen", "path": autostart, "content": _squeekboard(_text(autostart), dsi), "mode": None})
-    result.append({"kind": "screen", "path": root / "usr/share/dispsetup.sh", "content": DISPLAY_SETUP, "mode": 0o755})
+        result.append({"kind": "screen", "path": autostart, "content": _squeekboard(source_text(autostart), dsi), "mode": None})
     return result
 
 
@@ -438,3 +403,18 @@ def _text(path: Path) -> str:
         return ""
     except OSError as exc:
         raise ApplyError(f"cannot read {path}: {exc}") from exc
+
+
+def managed_paths(root: Path) -> set[str]:
+    settings = _H101C_SETTINGS
+    user_paths = {
+        "/" + (home / str(settings[key])).relative_to(root).as_posix()
+        for home in (root / "home").iterdir()
+        if home.is_dir()
+        for key in (
+            "desktop_wayfire_path",
+            "desktop_kanshi_path",
+            "desktop_labwc_path",
+        )
+    } if (root / "home").is_dir() else set()
+    return user_paths | {str(settings["desktop_autostart_path"])}

@@ -2,9 +2,9 @@ format = "ed-config-family"
 version = 1
 id = "ipc1200"
 platform = "CM0"
-disable_config_on_ubuntu = true
 unsupported_options = ["lte.5g"]
 systemd_services = ["ed-init.service", "ed-ec800m.service"]
+systemd_service_links = { "ed-init.service" = "/etc/systemd/system/sysinit.target.wants/ed-init.service", "ed-ec800m.service" = "/etc/systemd/system/multi-user.target.wants/ed-ec800m.service" }
 
 config_lines = [
   "dtparam=i2c_arm=on",
@@ -39,4 +39,3 @@ path = "/usr/lib/systemd/system/ed-ec800m.service"
 content_file = "ed-ec800m.service"
 mode = 420
 option = "lte.4g"
-
