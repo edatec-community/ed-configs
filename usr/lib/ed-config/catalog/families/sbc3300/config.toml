@@ -5,8 +5,7 @@ platform = "CM5"
 
 config_lines = [
     "enable_uart=1",
-    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
-    "gpio=45=op,dh",
+    "dtoverlay=i2c-rtc,pcf8563",
     "dtparam=ant2",
     "dtoverlay=wk2xxx-uart,sbc2300",
     "dtoverlay=uart0-pi5",
@@ -16,7 +15,6 @@ config_lines = [
     "dtoverlay=uart4-pi5",
     "dtoverlay=ed-ipc,ipc3300",
     "dtoverlay=sdio-pi5",
-    "dtoverlay=ed-backlight-pwm-pi5,sg215",
     "dtparam=rtc=off",
 ]
 
