@@ -6,6 +6,7 @@ platform = "CM4"
 config_lines = [
     "enable_uart=1",
     "dtoverlay=i2c-rtc,pcf8563",
+    "gpio=45=op,dh",
     "dtparam=ant2",
     "dtoverlay=wk2xxx-uart,sbc2300",
     "dtoverlay=uart2",
@@ -14,6 +15,7 @@ config_lines = [
     "dtoverlay=uart5",
     "dtoverlay=ed-ipc,ipc2300",
     "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+    "dtoverlay=ed-backlight-pwm",
 ]
 
 [[udev_rules]]
