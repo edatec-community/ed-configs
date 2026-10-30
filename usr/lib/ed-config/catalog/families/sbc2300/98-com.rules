@@ -1,0 +1,15 @@
+KERNEL=="ttyAMA2", PROGRAM="/bin/sh -c 'echo 1'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA3", PROGRAM="/bin/sh -c 'echo 2'", SYMLINK+="com%c"
+
+KERNEL=="ttysWK0", PROGRAM="/bin/sh -c 'echo 3'", SYMLINK+="com%c"
+
+KERNEL=="ttysWK1", PROGRAM="/bin/sh -c 'echo 4'", SYMLINK+="com%c"
+
+KERNEL=="ttysWK2", PROGRAM="/bin/sh -c 'echo 5'", SYMLINK+="com%c"
+
+KERNEL=="ttysWK3", PROGRAM="/bin/sh -c 'echo 6'", SYMLINK+="com%c"
+
+KERNEL=="ttyAMA4", PROGRAM="/bin/sh -c 'echo 1'", SYMLINK+="rs485_%c"
+
+KERNEL=="ttyAMA5", PROGRAM="/bin/sh -c 'echo 2'", SYMLINK+="rs485_%c"

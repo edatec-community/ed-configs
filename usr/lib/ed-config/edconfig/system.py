@@ -32,11 +32,27 @@ _ALSA_STATE_HEADER = re.compile(r"^state\.([^\s{]+)\s*\{\s*$")
 _USB_ID = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{4}$", re.IGNORECASE)
 
 
-def rooted(root: Path, absolute: str) -> Path:
+def rooted(
+    root: Path,
+    absolute: str,
+    *,
+    allow_leaf_symlink: bool = False,
+    verify_leaf_symlink: bool = False,
+) -> Path:
     path = Path(absolute)
     if not path.is_absolute() or ".." in path.parts:
         raise ConfigError(f"managed path must be absolute and normalized: {absolute!r}")
-    return root.joinpath(*path.parts[1:])
+    root = root.resolve()
+    target = root.joinpath(*path.parts[1:])
+    try:
+        target.parent.resolve(strict=False).relative_to(root)
+        if target.is_symlink() and verify_leaf_symlink:
+            target.resolve(strict=False).relative_to(root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ConfigError(f"managed path escapes the selected root: {absolute!r}") from exc
+    if target.is_symlink() and not allow_leaf_symlink:
+        raise ConfigError(f"managed path must not be a symbolic link: {absolute!r}")
+    return target
 
 
 def _read(path: Path) -> str | None:
@@ -48,19 +64,19 @@ def _read(path: Path) -> str | None:
         raise ApplyError(f"cannot read {path}: {exc}") from exc
 
 
-def _select_config(root: Path, requested: str | None) -> Path:
-    if requested:
-        return rooted(root, requested) if Path(requested).is_absolute() else root / requested
+def _select_config(root: Path) -> Path:
     path = rooted(root, BOOT_CONFIG_PATH)
     if path.is_file() or path.parent.is_dir():
         return path
     raise ApplyError(
-        f"cannot locate config.txt at {BOOT_CONFIG_PATH}; pass --config-file to override"
+        f"cannot locate config.txt at {BOOT_CONFIG_PATH}; this command uses the fixed boot configuration path"
     )
 
 
 def _detect_ubuntu(root: Path) -> bool:
-    content = _read(root / "etc/os-release") or ""
+    content = _read(
+        rooted(root, "/etc/os-release", allow_leaf_symlink=True, verify_leaf_symlink=True)
+    ) or ""
     values: dict[str, str] = {}
     for line in content.splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
@@ -235,35 +251,61 @@ def _split_managed_block(current: str) -> tuple[str, str, bool]:
     return "".join(lines[:begin]), "".join(lines[end + 1:]), True
 
 
-def _active_config_lines(content: str, platform: str) -> set[str]:
+def _config_line_key(value: str) -> str | None:
+    if "=" not in value:
+        return None
+    key, remainder = value.split("=", 1)
+    if key == "dtparam":
+        return f"dtparam:{remainder.split('=', 1)[0]}"
+    if key == "gpio" and "=" in remainder:
+        return f"gpio:{remainder.split('=', 1)[0]}"
+    if key == "dtoverlay":
+        return f"dtoverlay:{remainder.split(',', 1)[0]}"
+    return key
+
+
+def _active_config_lines(content: str, platform: str) -> list[str]:
     active = True
-    result: set[str] = set()
+    result: list[str] = []
     for line in content.splitlines():
         value = line.strip()
         if value.startswith("[") and value.endswith("]"):
             active = value[1:-1].casefold() in {"all", platform.casefold()}
         elif active and value and not value.startswith("#"):
-            result.add(value)
+            result.append(value)
     return result
 
 
 def _config_content(current: str | None, desired: list[str], platform: str) -> str:
     original = current or ""
     before, after, has_block = _split_managed_block(original)
-    existing = _active_config_lines(before + after, platform)
-    managed_lines = [line for line in desired if line not in existing]
-    managed = "\n".join([BEGIN, *managed_lines, END]) + "\n"
-    if has_block:
-        return before + managed + after
-    if not original:
+    base = before + after if has_block else original
+    active_lines = _active_config_lines(base, platform)
+    last_values: dict[str, str] = {}
+    exact_lines: set[str] = set()
+    for value in active_lines:
+        exact_lines.add(value)
+        key = _config_line_key(value)
+        if key is not None:
+            last_values[key] = value
+    managed_lines = [
+        line for line in desired
+        if line not in exact_lines
+        or (
+            (key := _config_line_key(line)) is not None
+            and last_values.get(key) != line
+        )
+    ]
+    managed = "\n".join([BEGIN, "[all]", *managed_lines, END]) + "\n"
+    if not base:
         return managed
-    if original.endswith("\n\n"):
+    if base.endswith("\n\n"):
         separator = ""
-    elif original.endswith("\n"):
+    elif base.endswith("\n"):
         separator = "\n"
     else:
         separator = "\n\n"
-    return original + separator + managed
+    return base + separator + managed
 
 
 def _release_content(current: str | None, code: int) -> str:
@@ -435,7 +477,9 @@ def _merge_alsa_state(
 
     current_blocks = _alsa_state_blocks(current)
     if not current_blocks:
-        return current
+        raise ConfigError(
+            "cannot apply managed ALSA state: existing state file has no parseable state blocks"
+        )
 
     output: list[str] = []
     cursor = 0
@@ -479,6 +523,60 @@ def _remove_alsa_state_blocks(current: str, names: set[str]) -> str:
         cursor = end
     output.append(current[cursor:])
     return "".join(output)
+
+
+def _alsa_file_original(
+    root: Path,
+    current: str | None,
+    metadata: dict[str, Any] | None,
+) -> tuple[str, int] | None:
+    if (
+        current is None
+        or not isinstance(metadata, dict)
+        or metadata.get("cleanup_safe") is not True
+    ):
+        return None
+    applied_digest = metadata.get("applied_sha256")
+    if (
+        not isinstance(applied_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", applied_digest)
+        or hashlib.sha256(current.encode("utf-8")).hexdigest() != applied_digest
+    ):
+        return None
+    if metadata.get("original_absent") is True:
+        return None
+    original_digest = metadata.get("original_sha256")
+    if (
+        not isinstance(original_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", original_digest)
+    ):
+        return None
+    if original_digest == applied_digest:
+        original_mode = metadata.get("original_mode")
+        if (
+            not isinstance(original_mode, int)
+            or isinstance(original_mode, bool)
+            or not 0 <= original_mode <= 0o7777
+        ):
+            return None
+        return current, original_mode
+    backup_path = metadata.get("original_backup")
+    if (
+        not isinstance(backup_path, str)
+        or not backup_path.startswith("/var/lib/ed-config/backups/")
+    ):
+        return None
+    original = _read(rooted(root, backup_path))
+    if (
+        original is None
+        or hashlib.sha256(original.encode("utf-8")).hexdigest() != original_digest
+    ):
+        return None
+    try:
+        mode = stat.S_IMODE(rooted(root, backup_path).stat().st_mode)
+    except OSError:
+        return None
+    return original, mode
 
 
 def _catalog_rule_contents(catalog: Catalog) -> set[str]:
@@ -643,7 +741,6 @@ def build_plan(
     catalog: Catalog,
     resolution: dict[str, Any],
     root: Path,
-    config_file: str | None = None,
     os_name: str = "auto",
     detected_usb_storage_quirks: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -651,14 +748,41 @@ def build_plan(
     if os_name not in {"auto", "ubuntu", "raspberrypi"}:
         raise ConfigError(f"unsupported OS selection: {os_name}")
     ubuntu = _detect_ubuntu(root) if os_name == "auto" else os_name == "ubuntu"
-    config_path = _select_config(root, config_file)
+    config_path = _select_config(root)
     previous_family = _previous_family(catalog, root)
+    try:
+        previous_current = read_status(root).get("current") or {}
+    except ConfigError:
+        previous_current = {}
+    raw_alsa_files = previous_current.get("managed_alsa_files", {})
+    previous_alsa_files = (
+        raw_alsa_files if isinstance(raw_alsa_files, dict) else {}
+    )
+    dirty_alsa_files: set[str] = set()
+    for path, metadata in previous_alsa_files.items():
+        if not isinstance(metadata, dict):
+            continue
+        try:
+            target = rooted(root, str(path))
+        except ConfigError:
+            continue
+        current = _read(target)
+        digest = metadata.get("applied_sha256")
+        if (
+            metadata.get("cleanup_safe") is not True
+            or current is None
+            or not isinstance(digest, str)
+            or hashlib.sha256(current.encode("utf-8")).hexdigest() != digest
+        ):
+            dirty_alsa_files.add(str(path))
     desired = [item["value"] for item in resolution["config_lines"]]
     if ubuntu:
         disabled = set(catalog.ubuntu_disabled_lines)
         desired = [line for line in desired if line not in disabled]
 
     operations: list[dict[str, Any]] = []
+    alsa_file_originals: dict[str, str | None] = {}
+    managed_alsa_targets: dict[str, str] = {}
 
     package_paths = [Path(item) for item in resolution.get("audio_packages", [])]
     if root == Path("/") and package_paths:
@@ -680,11 +804,20 @@ def build_plan(
         uid: int | None = None,
         gid: int | None = None,
     ) -> None:
+        rooted(root, "/" + path.relative_to(root).as_posix())
         current = _read(path)
         try:
-            original_mode = stat.S_IMODE(path.stat().st_mode)
+            original_stat = path.stat()
         except OSError:
+            original_stat = None
+        if original_stat is None:
             original_mode = None
+            original_uid = None
+            original_gid = None
+        else:
+            original_mode = stat.S_IMODE(original_stat.st_mode)
+            original_uid = original_stat.st_uid
+            original_gid = original_stat.st_gid
         mode_changed = (
             kind == "managed_file"
             and mode is not None
@@ -700,6 +833,8 @@ def build_plan(
             "_content": content,
             "_original": current,
             "_original_mode": original_mode,
+            "_original_uid": original_uid,
+            "_original_gid": original_gid,
             "_mode": mode,
             "_uid": uid,
             "_gid": gid,
@@ -865,7 +1000,7 @@ def build_plan(
     managed_services_after: set[str] = set()
     for service in sorted(selected_services | previously_managed_services):
         link_path = known_service_links[service]
-        target = rooted(root, link_path)
+        target = rooted(root, link_path, allow_leaf_symlink=True)
         desired_link = f"/usr/lib/systemd/system/{service}"
         unit_path = f"/usr/lib/systemd/system/{service}"
         unit_target = rooted(root, unit_path)
@@ -960,28 +1095,58 @@ def build_plan(
         asound_content = resolution.get("alsa_config")
         managed_asound = _catalog_asset_contents(catalog, "alsa_config_file")
         current_asound = _read(asound_target)
+        alsa_file_originals[asound_path] = current_asound
+        previous_asound = previous_alsa_files.get(asound_path)
         if asound_content:
-            if current_asound is None or current_asound in managed_asound:
+            previously_selected = (
+                previous_family is not None
+                and previous_family.get("alsa_config_target") == asound_path
+            )
+            if (
+                current_asound is None
+                or current_asound in managed_asound
+                or previously_selected
+            ):
                 write_operation("alsa_config", asound_target, str(asound_content), 0o644)
-        elif previous_family is not None and current_asound in managed_asound:
-            operations.append({
-                "kind": "alsa_config",
-                "action": "delete",
-                "path": asound_path,
-                "changed": True,
-                "_target": asound_target,
-                "_original": _read(asound_target),
-            })
+                if current_asound == str(asound_content):
+                    operations[-1]["_backup_required"] = True
+                managed_alsa_targets[asound_path] = "alsa_config"
+            elif current_asound == str(asound_content):
+                managed_alsa_targets[asound_path] = "alsa_config"
+        elif previous_family is not None:
+            original = _alsa_file_original(root, current_asound, previous_asound)
+            if original is not None:
+                original_content, original_mode = original
+                try:
+                    current_mode = stat.S_IMODE(asound_target.stat().st_mode)
+                except OSError:
+                    current_mode = None
+                if current_asound != original_content or current_mode != original_mode:
+                    write_operation(
+                        "alsa_config", asound_target, original_content, original_mode
+                    )
+                    operations[-1]["_force_mode"] = True
+                    operations[-1]["changed"] = True
         if previous_family is not None:
             old_path = previous_family.get("alsa_config_target")
             if old_path and old_path != asound_path:
                 old_target = rooted(root, old_path)
                 old_content = _read(old_target)
-                if old_content in managed_asound:
-                    operations.append({
-                        "kind": "alsa_config", "action": "delete", "path": old_path,
-                        "changed": True, "_target": old_target, "_original": old_content,
-                    })
+                original = _alsa_file_original(
+                    root, old_content, previous_alsa_files.get(old_path)
+                )
+                if original is not None:
+                    original_content, original_mode = original
+                    try:
+                        current_mode = stat.S_IMODE(old_target.stat().st_mode)
+                    except OSError:
+                        current_mode = None
+                    if old_content != original_content or current_mode != original_mode:
+                        write_operation(
+                            "alsa_config", old_target, original_content, original_mode
+                        )
+                        operations[-1]["_force_mode"] = True
+                        operations[-1]["changed"] = True
 
     if resolution.get("alsa_state_target") or (
         previous_family is not None and previous_family.get("alsa_state_target")
@@ -990,13 +1155,15 @@ def build_plan(
         state_target = rooted(root, state_path)
         state_content = resolution.get("alsa_state")
         current_state = _read(state_target)
+        alsa_file_originals[state_path] = current_state
+        previous_state = previous_alsa_files.get(state_path)
         managed_names = {str(block) for block in resolution.get("alsa_state_blocks", [])}
         removable_old_names: set[str] = set()
-        if previous_family is not None and current_state is not None:
-            try:
-                previous_current = read_status(root).get("current") or {}
-            except ConfigError:
-                previous_current = {}
+        if (
+            previous_family is not None
+            and current_state is not None
+            and state_path not in dirty_alsa_files
+        ):
             recorded_hashes = previous_current.get("managed_alsa_blocks", {})
             if not isinstance(recorded_hashes, dict):
                 recorded_hashes = {}
@@ -1025,56 +1192,43 @@ def build_plan(
             if current_state != merged_state:
                 write_operation("alsa", state_target, merged_state, 0o644)
                 alsa_restore_needed = True
+            selected_state_hashes = _alsa_block_hashes(merged_state)
+            desired_state_hashes = _alsa_block_hashes(str(state_content))
+            if any(
+                selected_state_hashes.get(str(name)) == desired_state_hashes.get(str(name))
+                for name in resolution.get("alsa_state_blocks", [])
+            ):
+                managed_alsa_targets[state_path] = "alsa"
         elif current_state is not None and previous_family is not None:
-            remaining_state = _remove_alsa_state_blocks(current_state, removable_old_names)
-            if remaining_state != current_state:
-                if remaining_state.strip():
-                    write_operation("alsa", state_target, remaining_state, 0o644)
-                else:
-                    operations.append({
-                        "kind": "alsa",
-                        "action": "delete",
-                        "path": state_path,
-                        "changed": True,
-                        "_target": state_target,
-                        "_original": current_state,
-                    })
-                alsa_restore_needed = True
+            original = _alsa_file_original(root, current_state, previous_state)
+            if original is not None:
+                original_content, original_mode = original
+                try:
+                    current_mode = stat.S_IMODE(state_target.stat().st_mode)
+                except OSError:
+                    current_mode = None
+                if current_state != original_content or current_mode != original_mode:
+                    write_operation("alsa", state_target, original_content, original_mode)
+                    operations[-1]["_force_mode"] = True
+                    operations[-1]["changed"] = True
         if previous_family is not None:
             old_path = previous_family.get("alsa_state_target")
             if old_path and old_path != state_path:
                 old_target = rooted(root, old_path)
                 old_content = _read(old_target)
-                if old_content is not None:
+                original = _alsa_file_original(
+                    root, old_content, previous_alsa_files.get(old_path)
+                )
+                if original is not None:
+                    original_content, original_mode = original
                     try:
-                        old_status = read_status(root).get("current") or {}
-                    except ConfigError:
-                        old_status = {}
-                    old_recorded = old_status.get("managed_alsa_blocks", {})
-                    if not isinstance(old_recorded, dict):
-                        old_recorded = {}
-                    old_asset = catalog.family_directories[str(previous_family["id"]).casefold()] / str(
-                        previous_family.get("alsa_state_file", "")
-                    )
-                    old_asset_hashes = _alsa_block_hashes(old_asset.read_text(encoding="utf-8")) if old_asset.is_file() else {}
-                    old_current_hashes = _alsa_block_hashes(old_content)
-                    safe_names = {
-                        str(name) for name in previous_family.get("alsa_state_blocks", [])
-                        if old_current_hashes.get(str(name)) in {
-                            old_recorded.get(str(name)), old_asset_hashes.get(str(name))
-                        }
-                    }
-                    remaining = _remove_alsa_state_blocks(
-                        old_content, safe_names
-                    )
-                    if remaining != old_content:
-                        if remaining.strip():
-                            write_operation("alsa", old_target, remaining, 0o644)
-                        else:
-                            operations.append({
-                                "kind": "alsa", "action": "delete", "path": old_path,
-                                "changed": True, "_target": old_target, "_original": old_content,
-                            })
+                        current_mode = stat.S_IMODE(old_target.stat().st_mode)
+                    except OSError:
+                        current_mode = None
+                    if old_content != original_content or current_mode != original_mode:
+                        write_operation("alsa", old_target, original_content, original_mode)
+                        operations[-1]["_force_mode"] = True
+                        operations[-1]["changed"] = True
 
     managed_profile_sets = _catalog_target_asset_contents(
         catalog, "alsa_profile_set_file", "alsa_profile_set_target"
@@ -1230,6 +1384,21 @@ def build_plan(
     release = rooted(root, RELEASE_PATH)
     write_operation("release", release, _release_content(_read(release), resolution["product_code"]), 0o644)
 
+    for operation in operations:
+        if (
+            operation.get("action") != "delete"
+            or operation.get("kind") == "systemd"
+            or operation.get("_target") is None
+        ):
+            continue
+        try:
+            original_stat = operation["_target"].stat()
+        except OSError:
+            continue
+        operation["_original_mode"] = stat.S_IMODE(original_stat.st_mode)
+        operation["_original_uid"] = original_stat.st_uid
+        operation["_original_gid"] = original_stat.st_gid
+
     return {
         "format": "ed-config-plan",
         "schema_version": 1,
@@ -1248,6 +1417,10 @@ def build_plan(
         "_managed_usb_storage_quirks": sorted(managed_usb_quirks),
         "_managed_file_hashes": dict(sorted(managed_files_after.items())),
         "_managed_systemd_services": sorted(managed_services_after),
+        "_managed_alsa_targets": managed_alsa_targets,
+        "_alsa_file_originals": alsa_file_originals,
+        "_previous_alsa_files": previous_alsa_files,
+        "_dirty_alsa_files": sorted(dirty_alsa_files),
         "_screen_paths": sorted(selected_screen_paths),
         "_previous_screen_files": previous_screen_files,
         "_dirty_screen_paths": sorted(dirty_screen_paths),
@@ -1326,7 +1499,7 @@ def _atomic_symlink(path: Path, target: str) -> None:
 
 @contextmanager
 def _lock(root: Path) -> Iterator[None]:
-    path = root / "run/lock/ed-config.lock"
+    path = rooted(root, "/run/lock/ed-config.lock")
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with path.open("a+", encoding="utf-8") as stream:
@@ -1340,7 +1513,7 @@ def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
     changed = [
         op for op in operations
         if (
-            op["changed"]
+            (op["changed"] or op.get("_backup_required"))
             and op["kind"] != "packages"
             and op.get("_target") is not None
             and (os.path.lexists(op["_target"]) if op["kind"] == "systemd" else op["_target"].exists())
@@ -1349,7 +1522,7 @@ def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
     if not changed:
         return None
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    directory = root / "var/lib/ed-config/backups" / stamp
+    directory = rooted(root, "/var/lib/ed-config/backups") / stamp
     for operation in changed:
         source: Path = operation["_target"]
         destination = directory / source.relative_to(root)
@@ -1358,104 +1531,163 @@ def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
     return directory
 
 
-def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
+def _write_state_document(
+    root: Path,
+    configured: bool,
+    current: dict[str, Any] | None,
+    last_apply: dict[str, Any],
+) -> None:
+    state = {
+        "format": "ed-config-state",
+        "schema_version": 2,
+        "configured": configured,
+        "current": current if configured else None,
+        "last_apply": last_apply,
+    }
+    path = rooted(root, "/var/lib/ed-config/state.json")
+    _atomic_write(path, json.dumps(state, indent=2, ensure_ascii=False) + "\n", 0o644)
+
+
+def _current_state(root: Path) -> tuple[bool, dict[str, Any] | None]:
+    try:
+        status = read_status(root)
+    except ConfigError:
+        return False, None
+    return status["configured"], status.get("current")
+
+
+def _record_failure_locked(root: Path, requested_model: str, error: str) -> None:
+    try:
+        configured, current = _current_state(root)
+        attempted_at = datetime.now(timezone.utc).isoformat()
+        _write_state_document(
+            root,
+            configured,
+            current,
+            {
+                "status": "failed",
+                "success": False,
+                "requested_model": requested_model,
+                "attempted_at": attempted_at,
+                "completed_at": attempted_at,
+                "error": error,
+                "planned_paths": [],
+                "attempted_paths": [],
+                "possibly_modified_paths": [],
+                "rollback_failed_paths": [],
+            },
+        )
+    except (ConfigError, OSError):
+        return
+
+
+def _operation_paths(operations: list[dict[str, Any]]) -> list[str]:
+    return sorted({
+        str(operation["path"])
+        for operation in operations
+        if operation.get("changed")
+    })
+
+
+def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
     root = Path(plan["root"])
-    with _lock(root):
+    configured_before, current_before = _current_state(root)
+    attempted_at = datetime.now(timezone.utc).isoformat()
+    planned_paths = _operation_paths(plan["operations"])
+    planned_packages = sorted({
+        Path(package).name
+        for operation in plan["operations"]
+        if operation.get("changed") and operation.get("kind") == "packages"
+        for package in operation.get("_packages", [])
+    })
+    last_apply: dict[str, Any] = {
+        "status": "in_progress",
+        "success": None,
+        "requested_model": plan["model"],
+        "attempted_at": attempted_at,
+        "error": None,
+        "planned_paths": planned_paths,
+        "attempted_paths": [],
+        "possibly_modified_paths": [],
+        "rollback_failed_paths": [],
+    }
+    if planned_packages:
+        last_apply["planned_packages"] = planned_packages
+    _write_state_document(root, configured_before, current_before, last_apply)
+
+    completed: list[dict[str, Any]] = []
+    attempted_paths: list[str] = []
+    backup_dir: Path | None = None
+    active_operation: dict[str, Any] | None = None
+    phase = "backup"
+    try:
         backup_dir = _backup(root, plan["operations"])
         ordered = sorted(plan["operations"], key=lambda op: op["kind"] == "release")
-        completed: list[dict[str, Any]] = []
-        try:
-            for operation in ordered:
-                if not operation["changed"]:
-                    continue
-                if operation["kind"] == "packages":
-                    _install_local_packages(operation["_packages"])
-                    completed.append(operation)
-                    continue
-                if operation["kind"] == "alsa_restore":
-                    _restore_alsa_state(operation["_cards"], set(operation.get("_skip_ucm_cards", [])))
-                    completed.append(operation)
-                    continue
-                target: Path = operation["_target"]
-                if operation["action"] == "delete":
-                    target.unlink(missing_ok=True)
-                elif operation["action"] == "symlink":
-                    _atomic_symlink(target, operation["_symlink_target"])
-                else:
-                    _atomic_write(
-                        target,
-                        operation["_content"],
-                        operation.get("_mode"),
-                        operation.get("_uid"),
-                        operation.get("_gid"),
-                        force_mode=operation["kind"] == "managed_file",
-                    )
+        phase = "apply"
+        for operation in ordered:
+            if not operation["changed"]:
+                continue
+            active_operation = operation
+            next_attempted = list(attempted_paths)
+            if operation["path"] not in next_attempted:
+                next_attempted.append(operation["path"])
+            in_progress = dict(last_apply)
+            in_progress["attempted_paths"] = next_attempted
+            in_progress["possibly_modified_paths"] = next_attempted
+            _write_state_document(root, configured_before, current_before, in_progress)
+            last_apply = in_progress
+            attempted_paths = next_attempted
+            if operation["kind"] == "packages":
+                _install_local_packages(operation["_packages"])
                 completed.append(operation)
-        except OSError as exc:
-            rollback_errors: list[str] = []
-            for applied in reversed(completed):
-                if applied["kind"] == "packages" or applied.get("_target") is None:
-                    continue
-                target = applied["_target"]
-                original = applied.get("_original")
-                try:
-                    if applied.get("kind") == "systemd":
-                        old_target = applied.get("_original_symlink_target")
-                        if old_target is None:
-                            target.unlink(missing_ok=True)
-                        else:
-                            _atomic_symlink(target, old_target)
-                    elif original is None:
-                        target.unlink(missing_ok=True)
-                    else:
-                        _atomic_write(
-                            target,
-                            original,
-                            applied.get("_original_mode"),
-                            applied.get("_uid"),
-                            applied.get("_gid"),
-                            force_mode=applied["kind"] == "managed_file",
-                        )
-                except OSError as rollback_error:
-                    rollback_errors.append(f"{applied['path']}: {rollback_error}")
-            message = f"failed to apply {operation['path']}: {exc}"
-            if rollback_errors:
-                message += "; rollback also failed: " + "; ".join(rollback_errors)
-            raise ApplyError(message) from exc
+                continue
+            if operation["kind"] == "alsa_restore":
+                _restore_alsa_state(
+                    operation["_cards"], set(operation.get("_skip_ucm_cards", []))
+                )
+                completed.append(operation)
+                continue
+            target: Path = operation["_target"]
+            if operation["action"] == "delete":
+                target.unlink(missing_ok=True)
+            elif operation["action"] == "symlink":
+                _atomic_symlink(target, operation["_symlink_target"])
+            else:
+                _atomic_write(
+                    target,
+                    operation["_content"],
+                    operation.get("_mode"),
+                    operation.get("_uid"),
+                    operation.get("_gid"),
+                    force_mode=operation.get(
+                        "_force_mode", operation["kind"] == "managed_file"
+                    ),
+                )
+            completed.append(operation)
 
-        attempted_at = datetime.now(timezone.utc).isoformat()
-        state = {
-            "format": "ed-config-state",
-            "schema_version": 2,
-            "configured": True,
-            "current": {
-                "model": plan["model"],
-                "options": plan["options"],
-                "product_code": plan["product_code"],
-                "applied_at": attempted_at,
-                "reboot_required": plan["reboot_required"],
-                "catalog_digest": plan["_resolution"]["catalog_digest"],
-                "managed_rule_files": sorted(
-                    op["path"] for op in plan["operations"]
-                    if op["kind"] == "udev" and op["action"] == "write"
-                ),
-            },
-            "last_apply": {
-                "success": True,
-                "requested_model": plan["model"],
-                "attempted_at": attempted_at,
-                "error": None,
-            },
+        phase = "state_commit"
+        completed_at = datetime.now(timezone.utc).isoformat()
+        current = {
+            "model": plan["model"],
+            "options": plan["options"],
+            "product_code": plan["product_code"],
+            "applied_at": completed_at,
+            "reboot_required": plan["reboot_required"],
+            "catalog_digest": plan["_resolution"]["catalog_digest"],
+            "managed_rule_files": sorted(
+                op["path"] for op in plan["operations"]
+                if op["kind"] == "udev" and op["action"] == "write"
+            ),
         }
         managed_usb_quirks = plan.get("_managed_usb_storage_quirks", [])
         if managed_usb_quirks:
-            state["current"]["managed_usb_storage_quirks"] = managed_usb_quirks
+            current["managed_usb_storage_quirks"] = managed_usb_quirks
         managed_files = plan.get("_managed_file_hashes", {})
         if managed_files:
-            state["current"]["managed_file_hashes"] = managed_files
+            current["managed_file_hashes"] = managed_files
         managed_services = plan.get("_managed_systemd_services", [])
         if managed_services:
-            state["current"]["managed_systemd_services"] = managed_services
+            current["managed_systemd_services"] = managed_services
         screen_paths = set(plan.get("_screen_paths", []))
         previous_screen_files = plan.get("_previous_screen_files", {})
         dirty_screen_paths = set(plan.get("_dirty_screen_paths", []))
@@ -1476,14 +1708,16 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 source = backup_dir / operation["_target"].relative_to(root)
                 entry = {
                     "original_backup": "/" + source.relative_to(root).as_posix(),
-                    "original_sha256": hashlib.sha256(operation["_original"].encode("utf-8")).hexdigest(),
+                    "original_sha256": hashlib.sha256(
+                        operation["_original"].encode("utf-8")
+                    ).hexdigest(),
                 }
             else:
                 continue
             entry["applied_sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
             screen_files["/" + operation["_target"].relative_to(root).as_posix()] = entry
         if screen_files:
-            state["current"]["managed_screen_files"] = screen_files
+            current["managed_screen_files"] = screen_files
         resolution = plan["_resolution"]
         alsa_target = resolution.get("alsa_state_target")
         if alsa_target and resolution.get("alsa_state"):
@@ -1495,9 +1729,72 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 if actual_hashes.get(name) == desired_hashes.get(name)
             }
             if owned_blocks:
-                state["current"]["managed_alsa_blocks"] = owned_blocks
-        state_path = root / "var/lib/ed-config/state.json"
-        _atomic_write(state_path, json.dumps(state, indent=2, ensure_ascii=False) + "\n", 0o644)
+                current["managed_alsa_blocks"] = owned_blocks
+        managed_alsa_files: dict[str, dict[str, Any]] = {}
+        previous_alsa_files = plan.get("_previous_alsa_files", {})
+        dirty_alsa_files = set(plan.get("_dirty_alsa_files", []))
+        originals = plan.get("_alsa_file_originals", {})
+        for path in plan.get("_managed_alsa_targets", {}):
+            target = rooted(root, str(path))
+            applied_content = _read(target)
+            if applied_content is None:
+                continue
+            previous = previous_alsa_files.get(path)
+            if isinstance(previous, dict):
+                entry = dict(previous)
+                if path in dirty_alsa_files:
+                    entry["cleanup_safe"] = False
+            else:
+                original = originals.get(path)
+                if original is None:
+                    entry = {
+                        "original_absent": True,
+                        "cleanup_safe": True,
+                    }
+                else:
+                    backup_source = (
+                        backup_dir / target.relative_to(root)
+                        if backup_dir is not None else None
+                    )
+                    if backup_source is not None and backup_source.is_file():
+                        entry = {
+                            "original_backup": "/" + backup_source.relative_to(root).as_posix(),
+                            "original_sha256": hashlib.sha256(
+                                original.encode("utf-8")
+                            ).hexdigest(),
+                            "original_mode": stat.S_IMODE(backup_source.stat().st_mode),
+                            "cleanup_safe": True,
+                        }
+                    else:
+                        entry = {
+                            "original_sha256": hashlib.sha256(
+                                original.encode("utf-8")
+                            ).hexdigest(),
+                            "original_mode": stat.S_IMODE(target.stat().st_mode),
+                            "cleanup_safe": True,
+                        }
+            entry["applied_sha256"] = hashlib.sha256(
+                applied_content.encode("utf-8")
+            ).hexdigest()
+            managed_alsa_files[str(path)] = entry
+        if managed_alsa_files:
+            current["managed_alsa_files"] = managed_alsa_files
+        last_apply = {
+            "status": "succeeded",
+            "success": True,
+            "requested_model": plan["model"],
+            "attempted_at": attempted_at,
+            "completed_at": completed_at,
+            "error": None,
+            "planned_paths": planned_paths,
+            "attempted_paths": attempted_paths,
+            "changed_paths": planned_paths,
+            "possibly_modified_paths": [],
+            "rollback_failed_paths": [],
+        }
+        if planned_packages:
+            last_apply["planned_packages"] = planned_packages
+        _write_state_document(root, True, current, last_apply)
         return {
             "success": True,
             "changed": any(op["changed"] for op in plan["operations"]),
@@ -1512,10 +1809,91 @@ def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
             ],
             "reboot_required": plan["reboot_required"],
         }
+    except (OSError, ConfigError) as exc:
+        rollback_errors: list[str] = []
+        for applied in reversed(completed):
+            if applied["kind"] == "packages" or applied.get("_target") is None:
+                continue
+            target = applied["_target"]
+            original = applied.get("_original")
+            try:
+                if applied.get("kind") == "systemd":
+                    old_target = applied.get("_original_symlink_target")
+                    if old_target is None:
+                        target.unlink(missing_ok=True)
+                    else:
+                        _atomic_symlink(target, old_target)
+                elif original is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    _atomic_write(
+                        target,
+                        original,
+                        applied.get("_original_mode"),
+                        applied.get("_original_uid", applied.get("_uid")),
+                        applied.get("_original_gid", applied.get("_gid")),
+                        force_mode=True,
+                    )
+            except OSError as rollback_error:
+                rollback_errors.append(f"{applied['path']}: {rollback_error}")
+        if phase == "state_commit":
+            message = f"failed to record successful apply state: {exc}"
+        elif active_operation is not None:
+            message = f"failed to apply {active_operation['path']}: {exc}"
+        else:
+            message = f"failed to prepare apply: {exc}"
+        if rollback_errors:
+            message += "; rollback also failed: " + "; ".join(rollback_errors)
+        failed_at = datetime.now(timezone.utc).isoformat()
+        failed_last_apply = {
+            "status": "failed",
+            "success": False,
+            "requested_model": plan["model"],
+            "attempted_at": attempted_at,
+            "completed_at": failed_at,
+            "error": message,
+            "planned_paths": planned_paths,
+            "attempted_paths": attempted_paths,
+            "possibly_modified_paths": attempted_paths,
+            "rollback_failed_paths": sorted({item.split(":", 1)[0] for item in rollback_errors}),
+        }
+        if planned_packages:
+            failed_last_apply["planned_packages"] = planned_packages
+        try:
+            _write_state_document(
+                root, configured_before, current_before, failed_last_apply
+            )
+        except OSError:
+            pass
+        raise ApplyError(message) from exc
+
+
+def apply_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    root = Path(plan["root"])
+    with _lock(root):
+        return _apply_plan_locked(plan)
+
+
+def apply_request(
+    catalog: Catalog,
+    requested_model: str,
+    option_names: list[str],
+    root: Path,
+) -> dict[str, Any]:
+    root = root.resolve()
+    with _lock(root):
+        try:
+            resolution = catalog.resolve_model(requested_model, option_names)
+            plan = build_plan(catalog, resolution, root)
+        except (ConfigError, OSError) as exc:
+            _record_failure_locked(root, requested_model, str(exc))
+            raise
+        return _apply_plan_locked(plan)
 
 
 def read_status(root: Path) -> dict[str, Any]:
-    path = root.resolve() / "var/lib/ed-config/state.json"
+    root = root.resolve()
+    path = rooted(root, "/var/lib/ed-config/state.json")
     content = _read(path)
     if content is None:
         return {
@@ -1534,18 +1912,58 @@ def read_status(root: Path) -> dict[str, Any]:
 
     if state.get("format") != "ed-config-state" or state.get("schema_version") != 2:
         raise ConfigError(f"invalid status file {path}: unsupported state format or schema")
-    configured = bool(state.get("configured", False))
-    current = state.get("current") if configured else None
+    configured = state.get("configured")
+    if not isinstance(configured, bool):
+        raise ConfigError(f"invalid status file {path}: configured must be a boolean")
+    current = state.get("current")
     last_apply = state.get("last_apply")
-    if current is not None and not isinstance(current, dict):
-        raise ConfigError(f"invalid status file {path}: current must be an object")
+    if configured:
+        if not isinstance(current, dict):
+            raise ConfigError(f"invalid status file {path}: configured current must be an object")
+        if (
+            not isinstance(current.get("model"), str)
+            or not current["model"]
+            or not isinstance(current.get("product_code"), int)
+            or isinstance(current.get("product_code"), bool)
+            or not 0 <= current["product_code"] <= 0xFFFFFFFF
+            or not isinstance(current.get("options"), list)
+            or any(not isinstance(option, str) for option in current["options"])
+            or (
+                current.get("reboot_required") is not None
+                and not isinstance(current.get("reboot_required"), bool)
+            )
+            or (
+                current.get("applied_at") is not None
+                and not isinstance(current.get("applied_at"), str)
+            )
+        ):
+            raise ConfigError(f"invalid status file {path}: current has missing or invalid fields")
+    elif current is not None:
+        raise ConfigError(f"invalid status file {path}: unconfigured state must have null current")
     if last_apply is not None and not isinstance(last_apply, dict):
         raise ConfigError(f"invalid status file {path}: last_apply must be an object")
+    if isinstance(last_apply, dict):
+        status_value = last_apply.get("status")
+        if status_value is not None and (
+            not isinstance(status_value, str)
+            or status_value not in {"in_progress", "succeeded", "failed"}
+        ):
+            raise ConfigError(f"invalid status file {path}: last_apply.status is invalid")
+        for field in (
+            "planned_paths", "attempted_paths", "changed_paths",
+            "possibly_modified_paths", "rollback_failed_paths", "planned_packages",
+        ):
+            value = last_apply.get(field)
+            if value is not None and (
+                not isinstance(value, list)
+                or any(not isinstance(item, str) for item in value)
+            ):
+                raise ConfigError(f"invalid status file {path}: last_apply.{field} must be a string array")
     return {
         "format": "ed-config-status",
         "schema_version": 1,
         "configured": configured,
-        "current": current,
+        "current": current if configured else None,
         "last_apply": last_apply,
     }
 
@@ -1553,20 +1971,7 @@ def read_status(root: Path) -> dict[str, Any]:
 def record_apply_failure(root: Path, requested_model: str, error: str) -> None:
     root = root.resolve()
     try:
-        status = read_status(root)
-        state = {
-            "format": "ed-config-state",
-            "schema_version": 2,
-            "configured": status["configured"],
-            "current": status["current"],
-            "last_apply": {
-                "success": False,
-                "requested_model": requested_model,
-                "attempted_at": datetime.now(timezone.utc).isoformat(),
-                "error": error,
-            },
-        }
-        path = root / "var/lib/ed-config/state.json"
-        _atomic_write(path, json.dumps(state, indent=2, ensure_ascii=False) + "\n", 0o644)
+        with _lock(root):
+            _record_failure_locked(root, requested_model, error)
     except (ConfigError, OSError):
         return

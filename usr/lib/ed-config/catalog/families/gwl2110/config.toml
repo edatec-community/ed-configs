@@ -1,0 +1,15 @@
+format = "ed-config-family"
+version = 1
+id = "gwl2110"
+platform = "CM4"
+
+config_lines = [
+    "gpio=11=op,dl",
+    "gpio=12=op,dl",
+    "gpio=13=op,dl",
+    "dtoverlay=spi1-1cs",
+    "enable_uart=1",
+    "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+    "dtoverlay=uart2",
+]

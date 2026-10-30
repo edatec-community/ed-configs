@@ -9,7 +9,7 @@ from typing import Any
 from . import __version__
 from .catalog import Catalog
 from .errors import ConfigError
-from .system import apply_plan, build_plan, read_status, record_apply_failure
+from .system import apply_request, read_status, record_apply_failure
 
 
 def _json(value: Any, stream: Any = sys.stdout) -> None:
@@ -123,8 +123,25 @@ def _public_status(status: dict[str, Any]) -> dict[str, Any]:
     if isinstance(last_apply, dict):
         last_apply = {
             key: last_apply.get(key)
-            for key in ("success", "requested_model", "attempted_at", "error")
+            for key in (
+                "success",
+                "requested_model",
+                "attempted_at",
+                "error",
+            )
         }
+        for key in (
+            "status",
+            "completed_at",
+            "planned_paths",
+            "attempted_paths",
+            "changed_paths",
+            "possibly_modified_paths",
+            "rollback_failed_paths",
+            "planned_packages",
+        ):
+            if key in status.get("last_apply", {}):
+                last_apply[key] = status["last_apply"][key]
     return {
         "configured": bool(status.get("configured")),
         "current": current,
@@ -146,16 +163,29 @@ def _print_status(value: dict[str, Any]) -> None:
     if last is None:
         print("Last apply:      None")
     else:
-        print(f"Last apply:      {'Successful' if last.get('success') else 'Failed'}")
-        if not last.get("success"):
+        last_status = last.get("status")
+        label = {
+            "in_progress": "In progress",
+            "succeeded": "Successful",
+            "failed": "Failed",
+        }.get(last_status, "Successful" if last.get("success") else "Failed")
+        print(f"Last apply:      {label}")
+        if last_status == "in_progress":
+            print(f"Requested model: {last.get('requested_model') or 'Unknown'}")
+            for path in last.get("possibly_modified_paths") or []:
+                print(f"May be changing: {path}")
+        elif not last.get("success"):
             print(f"Requested model: {last.get('requested_model') or 'Unknown'}")
             print(f"Failure:         {last.get('error') or 'Unknown error'}")
             print(f"Attempted at:    {last.get('attempted_at') or 'Unknown'}")
+            for path in last.get("possibly_modified_paths") or []:
+                print(f"May be modified: {path}")
 
 
 def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
     program_dir = program_dir or Path(__file__).resolve().parents[1]
     arguments = list(argv) if argv is not None else sys.argv[1:]
+    apply_request_started = False
     if arguments and arguments[0] == "_validate":
         json_output = arguments[1:] in ([], ["-j"], ["--json"])
         if not json_output:
@@ -193,9 +223,8 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
                 print("Supported EDATEC models:\n")
                 print("\n".join(models))
         elif args.command == "apply":
-            resolution = catalog.resolve_model(args.model, _options(args))
-            plan = build_plan(catalog, resolution, args.root)
-            value = apply_plan(plan)
+            apply_request_started = True
+            value = apply_request(catalog, args.model, _options(args), args.root)
             if args.json:
                 _json(value)
             else:
@@ -214,7 +243,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
                 print(f"ed-config {__version__}")
         return 0
     except (ConfigError, OSError) as exc:
-        if args.command == "apply":
+        if args.command == "apply" and not apply_request_started:
             record_apply_failure(args.root, args.model, str(exc))
         if getattr(args, "json", False):
             _json({"success": False, "error": str(exc)}, stream=sys.stderr)

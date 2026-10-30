@@ -1,0 +1,25 @@
+format = "ed-config-family"
+version = 1
+id = "sbc3300"
+platform = "CM5"
+
+config_lines = [
+    "enable_uart=1",
+    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
+    "gpio=45=op,dh",
+    "dtparam=ant2",
+    "dtoverlay=wk2xxx-uart,sbc2300",
+    "dtoverlay=uart0-pi5",
+    "dtoverlay=uart1-pi5",
+    "dtoverlay=uart2-pi5",
+    "dtoverlay=uart3-pi5",
+    "dtoverlay=uart4-pi5",
+    "dtoverlay=ed-ipc,ipc3300",
+    "dtoverlay=sdio-pi5",
+    "dtoverlay=ed-backlight-pwm-pi5,sg215",
+    "dtparam=rtc=off",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"

@@ -803,8 +803,17 @@ class Catalog:
             option_lines += list(
                 option.get(f"{str(model['platform']).casefold()}_config_lines", [])
             )
+            family_option_lines = family.get("option_config_lines", {})
+            family_lines = next(
+                (
+                    lines
+                    for family_option, lines in family_option_lines.items()
+                    if str(family_option).casefold() == name.casefold()
+                ),
+                [],
+            )
             option_lines += list(
-                family.get("option_config_lines", {}).get(name, [])
+                family_lines
             )
             for line in option_lines:
                 if line not in values:

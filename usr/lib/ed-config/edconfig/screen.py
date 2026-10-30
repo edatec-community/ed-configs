@@ -220,8 +220,11 @@ def _has_window_rule(current: str, expected: str) -> bool:
 
 
 def _labwc(current: str, dsi: str, touches: list[str]) -> str:
+    managed_name = "HMI101C touch mapping"
     lines = current.splitlines()
+    marked_lines = _labwc_marked_lines(lines, managed_name)
     missing: list[str] = []
+    managed_lines: set[int] = set()
     for touch in touches:
         found = False
         for index, line in enumerate(lines):
@@ -234,9 +237,17 @@ def _labwc(current: str, dsi: str, touches: list[str]) -> str:
             if start >= 0:
                 value_start = start + len(marker)
                 value_end = line.find('"', value_start)
-                lines[index] = line[:value_start] + dsi + line[value_end:]
+                updated = line[:value_start] + dsi + line[value_end:]
+                if updated != line:
+                    lines[index] = updated
+                    if index not in marked_lines:
+                        managed_lines.add(index)
             elif "/>" in line:
-                lines[index] = line.replace("/>", f' mapToOutput="{dsi}"/>')
+                updated = line.replace("/>", f' mapToOutput="{dsi}"/>')
+                if updated != line:
+                    lines[index] = updated
+                    if index not in marked_lines:
+                        managed_lines.add(index)
         if not found:
             missing.append(touch)
     if not current.strip():
@@ -244,15 +255,27 @@ def _labwc(current: str, dsi: str, touches: list[str]) -> str:
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<labwc_config>\n'
             + "".join(
+                f'  <!-- BEGIN ed-config {managed_name} -->\n'
                 f'  <touch deviceName="{touch}" mapToOutput="{dsi}" />\n'
+                f'  <!-- END ed-config {managed_name} -->\n'
                 for touch in missing
             )
             + "</labwc_config>\n"
         )
     element = "".join(
+        f'  <!-- BEGIN ed-config {managed_name} -->\n'
         f'  <touch deviceName="{touch}" mapToOutput="{dsi}" />\n'
+        f'  <!-- END ed-config {managed_name} -->\n'
         for touch in missing
     )
+    for index in sorted(managed_lines, reverse=True):
+        line = lines[index]
+        indent = line[:len(line) - len(line.lstrip())]
+        lines[index] = (
+            f"{indent}<!-- BEGIN ed-config {managed_name} -->\n"
+            f"{line}\n"
+            f"{indent}<!-- END ed-config {managed_name} -->"
+        )
     if not missing:
         return "\n".join(lines) + "\n"
     for closing in ("</openbox_config>", "</labwc_config>"):
@@ -280,19 +303,58 @@ def _remove_labwc_managed_block(current: str, name: str) -> str:
     return current
 
 
+def _labwc_marked_lines(lines: list[str], name: str) -> set[int]:
+    begin = f"<!-- BEGIN ed-config {name} -->"
+    end = f"<!-- END ed-config {name} -->"
+    inside = False
+    marked: set[int] = set()
+    for index, line in enumerate(lines):
+        marker = line.strip()
+        if marker == begin:
+            if inside:
+                raise ApplyError(f"nested Labwc {name} block marker")
+            inside = True
+        elif marker == end:
+            if not inside:
+                raise ApplyError(f"unmatched Labwc {name} block marker")
+            inside = False
+        elif inside and "<touch" in line:
+            marked.add(index)
+    if inside:
+        raise ApplyError(f"unterminated Labwc {name} block")
+    return marked
+
+
 def _squeekboard(current: str, dsi: str) -> str:
+    name = "HMI101C squeekboard output"
+    begin = f"# BEGIN ed-config {name}"
+    end = f"# END ed-config {name}"
+    lines = current.splitlines()
+    while True:
+        start = next((index for index, line in enumerate(lines) if line.strip() == begin), None)
+        if start is None:
+            if end in lines:
+                raise ApplyError(f"unmatched autostart {name} block marker")
+            break
+        try:
+            finish = lines.index(end, start + 1)
+        except ValueError as exc:
+            raise ApplyError(f"unterminated autostart {name} block") from exc
+        del lines[finish]
+        del lines[start]
+
     setting = f"export SQUEEKBOARD_PREFERRED_OUTPUT={dsi}"
     result: list[str] = []
     replaced = False
-    for line in current.splitlines():
+    for line in lines:
         if line.lstrip().startswith("export SQUEEKBOARD_PREFERRED_OUTPUT="):
             if not replaced:
-                result.append(setting)
+                result.extend((begin, setting, end))
                 replaced = True
         else:
             result.append(line)
     if not replaced:
-        result.insert(0, setting)
+        result[0:0] = (begin, setting, end)
     return "\n".join(result) + "\n"
 
 
@@ -383,8 +445,7 @@ def operations(
             result.append({"kind": "screen", "path": wayfire, "content": current_wayfire, "mode": 0o644, "uid": owner.st_uid, "gid": owner.st_gid})
             labwc = home / str(settings["desktop_labwc_path"])
             current_labwc = source_text(labwc)
-            labwc_base = _remove_labwc_managed_block(current_labwc, f"{name} touch mapping") if current_labwc else current_labwc
-            labwc_content = _labwc(labwc_base, dsi, labwc_touches)
+            labwc_content = _labwc(current_labwc, dsi, labwc_touches)
             labwc_content = _remove_labwc_managed_block(
                 labwc_content, f"{name} {settings['desktop_legacy_labwc_window_label']}"
             )

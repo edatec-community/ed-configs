@@ -1,0 +1,19 @@
+format = "ed-config-family"
+version = 1
+id = "ipc2400"
+platform = "CM4"
+
+config_lines = [
+    "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+    "dtparam=i2c_arm=on",
+    "dtoverlay=uart2",
+    "dtoverlay=uart3",
+    "dtoverlay=uart4",
+    "dtoverlay=uart5",
+    "enable_uart=1",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"

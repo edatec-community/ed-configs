@@ -1,0 +1,23 @@
+format = "ed-config-family"
+version = 1
+id = "sbc2300"
+platform = "CM4"
+
+config_lines = [
+    "enable_uart=1",
+    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+    "gpio=45=op,dh",
+    "dtparam=ant2",
+    "dtoverlay=wk2xxx-uart,sbc2300",
+    "dtoverlay=uart2",
+    "dtoverlay=uart3",
+    "dtoverlay=uart4",
+    "dtoverlay=uart5",
+    "dtoverlay=ed-ipc,ipc2300",
+    "dtoverlay=sdhost,gpios_22_27,preserve_mmc",
+    "dtoverlay=ed-backlight-pwm",
+]
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/98-com.rules"
+content_file = "98-com.rules"

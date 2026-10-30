@@ -1,0 +1,11 @@
+format = "ed-config-family"
+version = 1
+id = "ipc3200"
+platform = "CM5"
+
+config_lines = [
+    "dtparam=i2c_arm=on",
+    "dtoverlay=ed-ipc,ipc3210",
+    "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi0",
+    "enable_uart=1",
+]

@@ -1,0 +1,15 @@
+format = "ed-config-family"
+version = 1
+id = "gwl2010"
+platform = "CM4"
+
+config_lines = [
+    "dtparam=i2c_arm=on",
+    "dtparam=spi=on",
+    "gpio=16=op,dl",
+    "gpio=20=op,dl",
+    "gpio=21=op,dl",
+    "dtoverlay=i2c4,pins_6_7",
+    "dtoverlay=spi0-1cs,cs0_pin=8",
+    "enable_uart=1",
+]

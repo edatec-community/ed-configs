@@ -84,6 +84,22 @@ subboard = "None"
 screen = "None"
 
 [[models]]
+name = "IPC3210"
+config = "ipc3200"
+platform = "CM5"
+board = "IPC2210"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC3220"
+config = "ipc3200"
+platform = "CM5"
+board = "IPC2220"
+subboard = "None"
+screen = "None"
+
+[[models]]
 name = "IPC2500"
 config = "ipc2200"
 platform = "CM4"
@@ -428,14 +444,6 @@ subboard = "None"
 screen = "None"
 
 [[models]]
-name = "CM5MEDIA"
-config = "cm5media"
-platform = "CM5"
-board = "CM4MEDIA"
-subboard = "None"
-screen = "None"
-
-[[models]]
 name = "HMI3010_070C"
 config = "hmi3010_070c"
 platform = "PI5"
@@ -512,6 +520,110 @@ name = "IPC2010"
 config = "ipc2010"
 platform = "CM4"
 board = "IPC2010"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "IPC2410"
+config = "ipc2400"
+platform = "CM4"
+board = "IPC2010"
+subboard = "S_EXPCOM1"
+screen = "None"
+
+[[models]]
+name = "IPC2420"
+config = "ipc2400"
+platform = "CM4"
+board = "IPC2010"
+subboard = "S_EXPCOM2"
+screen = "None"
+
+[[models]]
+name = "IPC2430"
+config = "ipc2400"
+platform = "CM4"
+board = "IPC2010"
+subboard = "S_EXPCOM3"
+screen = "None"
+
+[[models]]
+name = "GWL2010"
+config = "gwl2010"
+platform = "CM4"
+board = "GWL2010"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "GWL2110"
+config = "gwl2110"
+platform = "CM4"
+board = "GWL2110"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC2310"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2310"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC2311"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2311"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC2320"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2320"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC2321"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2321"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC3310"
+config = "sbc3300"
+platform = "CM5"
+board = "SBC2310"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC3311"
+config = "sbc3300"
+platform = "CM5"
+board = "SBC2311"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC3320"
+config = "sbc3300"
+platform = "CM5"
+board = "SBC2320"
+subboard = "None"
+screen = "None"
+
+[[models]]
+name = "SBC3321"
+config = "sbc3300"
+platform = "CM5"
+board = "SBC2321"
 subboard = "None"
 screen = "None"
 
