@@ -36,6 +36,86 @@ subboard = "None"
 screen = "H101C"
 
 [[models]]
+name = "HMI2320_121C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2320"
+subboard = "None"
+screen = "M121C"
+
+[[models]]
+name = "HMI2320_150C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2320"
+subboard = "None"
+screen = "M150C"
+
+[[models]]
+name = "HMI2320_156C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2320"
+subboard = "None"
+screen = "M156C"
+
+[[models]]
+name = "HMI2320_170C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2320"
+subboard = "None"
+screen = "M170C"
+
+[[models]]
+name = "HMI2320_215C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2320"
+subboard = "None"
+screen = "M215C"
+
+[[models]]
+name = "HMI2321_121C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2321"
+subboard = "None"
+screen = "M121C"
+
+[[models]]
+name = "HMI2321_150C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2321"
+subboard = "None"
+screen = "M150C"
+
+[[models]]
+name = "HMI2321_156C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2321"
+subboard = "None"
+screen = "M156C"
+
+[[models]]
+name = "HMI2321_170C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2321"
+subboard = "None"
+screen = "M170C"
+
+[[models]]
+name = "HMI2321_215C"
+config = "sbc2300"
+platform = "CM4"
+board = "SBC2321"
+subboard = "None"
+screen = "M215C"
+
+[[models]]
 name = "IPC2110"
 config = "ipc2100"
 platform = "CM4"
