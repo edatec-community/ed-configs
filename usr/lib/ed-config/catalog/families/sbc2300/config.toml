@@ -7,7 +7,6 @@ config_lines = [
     "enable_uart=1",
     "dtoverlay=i2c-rtc,pcf8563",
     "gpio=45=op,dh",
-    "dtparam=ant2",
     "dtoverlay=wk2xxx-uart,sbc2300",
     "dtoverlay=uart2",
     "dtoverlay=uart3",
