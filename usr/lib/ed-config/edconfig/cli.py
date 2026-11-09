@@ -103,6 +103,11 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="confirm tool package installation without prompting",
     )
+    apply.add_argument(
+        "--package-base-url",
+        metavar="URL",
+        help="install tool DEBs from this URL; use configured APT sources for dependencies",
+    )
     apply.add_argument("-j", "--json", action="store_true", help="print machine-readable JSON")
     apply.add_argument("-r", "--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)
 
@@ -255,6 +260,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
                 args.root,
                 args.install_tools,
                 args.yes,
+                args.package_base_url,
             )
             if args.json:
                 _json(value)

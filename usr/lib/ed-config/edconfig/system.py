@@ -19,7 +19,7 @@ from .errors import ApplyError, ConfigError
 from .operations import commands_digest, run_family_commands
 from .screen import managed_paths as screen_managed_paths
 from .screen import operations as screen_operations
-from .tool_packages import install_tool_packages
+from .tool_packages import install_tool_packages, install_tool_packages_from_directory
 
 
 BEGIN = "# BEGIN EDATEC MANAGED CONFIG"
@@ -698,6 +698,7 @@ def build_plan(
     detected_usb_storage_quirks: list[str] | None = None,
     install_tools: bool = False,
     assume_yes: bool = False,
+    package_base_url: str | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     packages_to_install = (
@@ -755,6 +756,7 @@ def build_plan(
             "changed": True,
             "_packages": packages_to_install,
             "_assume_yes": assume_yes,
+            "_package_base_url": package_base_url,
         })
 
     def write_operation(
@@ -1608,10 +1610,18 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
                 continue
             active_operation = operation
             if operation["kind"] == "tool_packages":
-                operation["_installed_packages"] = install_tool_packages(
-                    operation["_packages"],
-                    assume_yes=operation.get("_assume_yes", False),
-                )
+                package_base_url = operation.get("_package_base_url")
+                if package_base_url is None:
+                    operation["_installed_packages"] = install_tool_packages(
+                        operation["_packages"],
+                        assume_yes=operation.get("_assume_yes", False),
+                    )
+                else:
+                    operation["_installed_packages"] = install_tool_packages_from_directory(
+                        operation["_packages"],
+                        base_url=package_base_url,
+                        assume_yes=operation.get("_assume_yes", False),
+                    )
                 completed.append(operation)
                 continue
             next_attempted = list(attempted_paths)
@@ -1791,7 +1801,7 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
         if planned_packages:
             last_apply["planned_packages"] = planned_packages
         _write_state_document(root, True, current, last_apply)
-        return {
+        result = {
             "success": True,
             "changed": any(
                 op["changed"] and op["kind"] != "tool_packages"
@@ -1813,6 +1823,7 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
             ],
             "reboot_required": reboot_required,
         }
+        return result
     except (OSError, ConfigError) as exc:
         rollback_errors: list[str] = []
         for applied in reversed(completed):
@@ -1885,6 +1896,7 @@ def apply_request(
     root: Path,
     install_tools: bool = False,
     assume_yes: bool = False,
+    package_base_url: str | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     resolution = None
@@ -1909,6 +1921,7 @@ def apply_request(
                 root,
                 install_tools=install_tools,
                 assume_yes=assume_yes,
+                package_base_url=package_base_url,
             )
         except (ConfigError, OSError) as exc:
             _record_failure_locked(root, requested_model, str(exc))

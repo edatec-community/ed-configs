@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,7 +11,7 @@ import zlib
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from .errors import ApplyError
 from .terminal import colorize
@@ -21,6 +22,7 @@ APT_GET = "/usr/bin/apt-get"
 DPKG = "/usr/bin/dpkg"
 DPKG_DEB = "/usr/bin/dpkg-deb"
 DPKG_QUERY = "/usr/bin/dpkg-query"
+GETCONF = "/usr/bin/getconf"
 WGET = "/usr/bin/wget"
 EDATEC_ROOT = "https://apt.edatec.cn/raspbian"
 EDATEC_POOL = f"{EDATEC_ROOT}/pool/main/e/"
@@ -378,6 +380,203 @@ def install_tool_packages(packages: list[str], *, assume_yes: bool = False) -> l
                 "install downloaded EDATEC packages",
                 stream_output=True,
             )
+    print(file=sys.stderr, flush=True)
+    print(
+        colorize(
+            "Tool package installation completed: " + ", ".join(missing),
+            "green",
+            sys.stderr,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+    print(file=sys.stderr, flush=True)
+    return missing
+
+
+def _package_directory_url(base_url: str, architecture: str) -> str:
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ApplyError("package base URL must not be empty")
+    try:
+        parsed = urlsplit(base_url.strip())
+        _ = parsed.port
+    except ValueError as exc:
+        raise ApplyError(f"invalid package base URL: {exc}") from exc
+    if (
+        parsed.scheme.casefold() not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or any(part == ".." for part in unquote(parsed.path).split("/"))
+    ):
+        raise ApplyError("package base URL must be an HTTP(S) directory URL")
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme, parsed.netloc, f"{path}/{architecture}/", "", ""))
+
+
+def _custom_source_architecture() -> str:
+    long_bit = _command(
+        [GETCONF, "LONG_BIT"], "detect device userspace word size"
+    ).stdout.strip()
+    architecture_by_bits = {"64": "arm64", "32": "armhf"}
+    architecture = architecture_by_bits.get(long_bit)
+    if architecture is None:
+        raise ApplyError(f"unsupported userspace word size for DEB source: {long_bit!r}")
+    dpkg_architecture = _command(
+        [DPKG, "--print-architecture"], "detect device package architecture"
+    ).stdout.strip()
+    if dpkg_architecture != architecture:
+        raise ApplyError(
+            "device architecture does not match getconf LONG_BIT: "
+            f"{long_bit} bits selects {architecture}, dpkg reports {dpkg_architecture}"
+        )
+    return architecture
+
+
+def install_tool_packages_from_directory(
+    packages: list[str], *, base_url: str, assume_yes: bool = False
+) -> list[str]:
+    """Install validated local DEBs from an explicit directory without source fallback."""
+    requested = _validated_packages(packages)
+    if not requested:
+        return []
+    if os.geteuid() != 0:
+        raise ApplyError("tool packages must be installed as root")
+
+    print(f"Tool packages declared: {', '.join(requested)}", file=sys.stderr, flush=True)
+    missing = missing_packages(requested)
+    missing_set = set(missing)
+    for package in requested:
+        state = "not installed" if package in missing_set else "already installed (skip)"
+        print(f"  {package}: {state}", file=sys.stderr, flush=True)
+    if not missing:
+        print("All declared tool packages are already installed.", file=sys.stderr, flush=True)
+        print(file=sys.stderr, flush=True)
+        print(
+            colorize(
+                "Tool package installation completed: nothing to install",
+                "green",
+                sys.stderr,
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        print(file=sys.stderr, flush=True)
+        return []
+
+    architecture = _custom_source_architecture()
+    directory_url = _package_directory_url(base_url, architecture)
+    print(f"Packages to install: {', '.join(missing)}", file=sys.stderr, flush=True)
+    print(file=sys.stderr, flush=True)
+    print(f"Searching package directory: {directory_url}", file=sys.stderr, flush=True)
+    listing = _download_bytes(directory_url).decode("utf-8", errors="replace")
+    parser = _DirectoryLinks()
+    parser.feed(listing)
+
+    candidates: dict[str, tuple[str, str, str]] = {}
+    not_found: list[str] = []
+    for package in missing:
+        candidate = _latest_filename(parser.links, package, architecture)
+        if candidate is None:
+            not_found.append(package)
+            continue
+        filename, version = candidate
+        filename_metadata = _filename_candidate(filename, package, architecture)
+        if filename_metadata is None:
+            not_found.append(package)
+            continue
+        candidates[package] = (filename, version, filename_metadata[1])
+    if not_found:
+        raise ApplyError(
+            f"packages not found under {directory_url}: {', '.join(not_found)}; "
+            "no DEB files were downloaded"
+        )
+
+    for package in missing:
+        filename, version, candidate_architecture = candidates[package]
+        print(
+            f"  {package}: {version} ({candidate_architecture})",
+            file=sys.stderr,
+            flush=True,
+        )
+    print(file=sys.stderr, flush=True)
+    _confirm_install(assume_yes)
+    print(file=sys.stderr, flush=True)
+
+    try:
+        staging_directory = Path(tempfile.mkdtemp(prefix="ed-config-tool-debs-"))
+    except OSError as exc:
+        raise ApplyError(f"cannot create temporary DEB directory: {exc}") from exc
+
+    downloaded: list[Path] = []
+    try:
+        for package in missing:
+            filename, expected_version, expected_architecture = candidates[package]
+            target_url = f"{directory_url}{quote(filename, safe='._+~:-')}"
+            target = staging_directory / filename
+            print(
+                f"Downloading {package} from the specified package directory",
+                file=sys.stderr,
+                flush=True,
+            )
+            _command(
+                [
+                    WGET,
+                    "--timeout=30",
+                    "--tries=2",
+                    "--progress=bar:force",
+                    "-O",
+                    str(target),
+                    target_url,
+                ],
+                f"download {package} from the specified package directory",
+                stream_output=True,
+            )
+            actual_package = _deb_field(target, "Package")
+            actual_version = _deb_field(target, "Version")
+            actual_architecture = _deb_field(target, "Architecture")
+            if actual_package != package or actual_version != expected_version:
+                raise ApplyError(
+                    f"downloaded DEB metadata does not match directory listing for {package}"
+                )
+            if (
+                actual_architecture not in {architecture, "all"}
+                or actual_architecture != expected_architecture
+            ):
+                raise ApplyError(
+                    f"downloaded DEB architecture does not match directory listing for {package}"
+                )
+            downloaded.append(target)
+        print(
+            "Installing verified DEBs from the specified package directory: "
+            + ", ".join(missing),
+            file=sys.stderr,
+            flush=True,
+        )
+        _command(
+            [
+                APT_GET,
+                "install",
+                "--yes",
+                "--no-install-recommends",
+                *(str(path) for path in downloaded),
+            ],
+            "install verified packages from the specified package directory",
+            stream_output=True,
+        )
+        still_missing = missing_packages(missing)
+        if still_missing:
+            raise ApplyError(
+                "package manager completed without installing all requested packages: "
+                + ", ".join(still_missing)
+            )
+    except BaseException:
+        shutil.rmtree(staging_directory, ignore_errors=True)
+        raise
+
+    shutil.rmtree(staging_directory, ignore_errors=True)
     print(file=sys.stderr, flush=True)
     print(
         colorize(
