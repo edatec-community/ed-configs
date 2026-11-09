@@ -1,4 +1,4 @@
-Source: ed-config
+Source: ed-bsp-config
 Section: admin
 Priority: optional
 Maintainer: EDATEC Community <ed-config@edatec.cn>
@@ -7,9 +7,12 @@ Standards-Version: 4.6.2
 Rules-Requires-Root: no
 Homepage: https://github.com/edatec-community/ed-configs
 
-Package: ed-config
+Package: ed-bsp-config
 Architecture: all
 Depends: python3 (>= 3.11), ${misc:Depends}
+Provides: ed-config (= ${binary:Version})
+Breaks: ed-config (<< 1.0.1)
+Replaces: ed-config (<< 1.0.1)
 Description: EDATEC product configuration utility
  Configure EDATEC devices by product model and declared hardware options.
  The package includes the command line tool and its model configuration catalog.

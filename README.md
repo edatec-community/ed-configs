@@ -8,12 +8,12 @@
 `v1.0.0` Release 发布后，可用以下命令下载并安装初始版本：
 
 ```bash
-curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.0/ed-config_1.0.0_all.deb
-sudo apt install ./ed-config_1.0.0_all.deb
+curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.0/ed-bsp-config_1.0.0_all.deb
+sudo apt install ./ed-bsp-config_1.0.0_all.deb
 ```
 
 如果设备无法访问 GitHub，可在能访问的电脑上下载该包并复制到设备，然后执行上面的本地安装命令。
-也可在具备所需依赖的情况下使用 `sudo dpkg -i ./ed-config_1.0.0_all.deb`。
+也可在具备所需依赖的情况下使用 `sudo dpkg -i ./ed-bsp-config_1.0.0_all.deb`。
 
 安装软件包后，即可运行 `ed-config`。本包适用于 Python 3.11 或更新版本的 Debian 系统。
 

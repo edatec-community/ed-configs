@@ -1,4 +1,4 @@
-ed-config (1.0.0) unstable; urgency=medium
+ed-bsp-config (1.0.0) unstable; urgency=medium
 
   * Initial 1.0.0 release, packaging the current ed-config source and catalog.
 

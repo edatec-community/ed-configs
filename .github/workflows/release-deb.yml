@@ -41,8 +41,8 @@ jobs:
           set -eu
           dpkg-buildpackage -us -uc -b
           mkdir -p dist
-          mv "../ed-config_${{ steps.version.outputs.version }}_all.deb" dist/
-          dpkg-deb --info "dist/ed-config_${{ steps.version.outputs.version }}_all.deb"
+          mv "../ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" dist/
+          dpkg-deb --info "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb"
 
       - name: Create or update GitHub Release
         env:
@@ -50,7 +50,12 @@ jobs:
         run: |
           set -eu
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "dist/ed-config_${{ steps.version.outputs.version }}_all.deb" --clobber
+            gh release upload "$GITHUB_REF_NAME" "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" --clobber
+            legacy_asset="ed-config_${{ steps.version.outputs.version }}_all.deb"
+            assets="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
+            if printf '%s\n' "$assets" | grep -Fqx "$legacy_asset"; then
+              gh release delete-asset "$GITHUB_REF_NAME" "$legacy_asset" --yes
+            fi
           else
-            gh release create "$GITHUB_REF_NAME" "dist/ed-config_${{ steps.version.outputs.version }}_all.deb" --title "$GITHUB_REF_NAME" --generate-notes
+            gh release create "$GITHUB_REF_NAME" "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" --title "$GITHUB_REF_NAME" --generate-notes
           fi
