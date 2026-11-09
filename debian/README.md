@@ -3,7 +3,7 @@
 Build the binary package on Debian or Ubuntu with the Debian packaging tools installed:
 
 ```bash
-sudo apt-get install debhelper dpkg-dev
+sudo apt-get install build-essential debhelper dpkg-dev
 dpkg-buildpackage -us -uc -b
 ```
 
