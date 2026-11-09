@@ -708,7 +708,7 @@ def build_plan(
         if package not in packages_to_install:
             packages_to_install.append(package)
     if packages_to_install and root != Path("/"):
-        raise ConfigError("package installation requires --root /")
+        raise ConfigError("tool package installation requires the running system root")
     if os_name not in {"auto", "ubuntu", "raspberrypi"}:
         raise ConfigError(f"unsupported OS selection: {os_name}")
     ubuntu = _detect_ubuntu(root) if os_name == "auto" else os_name == "ubuntu"
@@ -1634,7 +1634,7 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
             last_apply = in_progress
             attempted_paths = next_attempted
             if operation["kind"] == "family_command":
-                run_family_commands(operation["_commands"], root)
+                run_family_commands(operation["_commands"])
                 completed.append(operation)
                 continue
             if operation["kind"] == "alsa_restore":
@@ -1910,7 +1910,7 @@ def apply_request(
             if install_tools:
                 requested_packages.extend(resolution.get("tool_debs", []))
             if requested_packages:
-                raise ConfigError("package installation requires --root /")
+                raise ConfigError("tool package installation requires the running system root")
     with _lock(root):
         try:
             if resolution is None:

@@ -109,11 +109,9 @@ def parser() -> argparse.ArgumentParser:
         help="install tool DEBs from this URL; use configured APT sources for dependencies",
     )
     apply.add_argument("-j", "--json", action="store_true", help="print machine-readable JSON")
-    apply.add_argument("-r", "--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)
 
     status = sub.add_parser("status", help="show the current and last apply status")
     status.add_argument("-j", "--json", action="store_true", help="print machine-readable JSON")
-    status.add_argument("-r", "--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)
 
     version = sub.add_parser("version", help="show the installed version")
     version.add_argument("-j", "--json", action="store_true", help="print machine-readable JSON")
@@ -257,7 +255,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
                 catalog,
                 args.model,
                 _options(args),
-                args.root,
+                Path("/"),
                 args.install_tools,
                 args.yes,
                 args.package_base_url,
@@ -267,7 +265,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
             else:
                 _print_apply(value)
         elif args.command == "status":
-            value = _public_status(read_status(args.root))
+            value = _public_status(read_status(Path("/")))
             if args.json:
                 _json(value)
             else:
@@ -281,7 +279,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
         return 0
     except (ConfigError, OSError) as exc:
         if args.command == "apply" and not apply_request_started:
-            record_apply_failure(args.root, args.model, str(exc))
+            record_apply_failure(Path("/"), args.model, str(exc))
         if getattr(args, "json", False):
             _json({"success": False, "error": str(exc)}, stream=sys.stderr)
         else:

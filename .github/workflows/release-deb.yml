@@ -1,0 +1,56 @@
+name: Build and publish DEB
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Install Debian packaging tools
+        run: sudo apt-get update && sudo apt-get install --yes debhelper
+
+      - name: Check tag and package versions
+        id: version
+        shell: bash
+        run: |
+          set -eu
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$tag_version" = "$GITHUB_REF_NAME" ]; then
+            echo "Release tags must start with v (for example v1.0.0)." >&2
+            exit 1
+          fi
+          package_version="$(dpkg-parsechangelog --show-field Version)"
+          app_version="$(PYTHONDONTWRITEBYTECODE=1 python3 -c 'import sys; sys.path.insert(0, "usr/lib/ed-config"); from edconfig import __version__; print(__version__)')"
+          if [ "$tag_version" != "$package_version" ] || [ "$tag_version" != "$app_version" ]; then
+            echo "Tag $GITHUB_REF_NAME must match Debian version $package_version and application version $app_version." >&2
+            exit 1
+          fi
+          echo "version=$package_version" >> "$GITHUB_OUTPUT"
+
+      - name: Build binary package
+        run: |
+          set -eu
+          dpkg-buildpackage -us -uc -b
+          mkdir -p dist
+          mv "../ed-config_${{ steps.version.outputs.version }}_all.deb" dist/
+          dpkg-deb --info "dist/ed-config_${{ steps.version.outputs.version }}_all.deb"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "dist/ed-config_${{ steps.version.outputs.version }}_all.deb" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "dist/ed-config_${{ steps.version.outputs.version }}_all.deb" --title "$GITHUB_REF_NAME" --generate-notes
+          fi

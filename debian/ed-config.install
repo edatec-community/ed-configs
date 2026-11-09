@@ -1,0 +1,4 @@
+usr/sbin/ed-config usr/sbin
+usr/lib/ed-config/main.py usr/lib/ed-config
+usr/lib/ed-config/edconfig/*.py usr/lib/ed-config/edconfig
+usr/lib/ed-config/catalog usr/lib/ed-config

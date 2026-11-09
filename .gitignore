@@ -1,0 +1,7 @@
+/dist/
+/debian/.debhelper/
+/debian/ed-config/
+/debian/files
+/debian/*.debhelper.log
+*.buildinfo
+*.changes

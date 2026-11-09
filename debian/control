@@ -1,0 +1,15 @@
+Source: ed-config
+Section: admin
+Priority: optional
+Maintainer: EDATEC Community <ed-config@edatec.cn>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/edatec-community/ed-configs
+
+Package: ed-config
+Architecture: all
+Depends: python3 (>= 3.11), ${misc:Depends}
+Description: EDATEC product configuration utility
+ Configure EDATEC devices by product model and declared hardware options.
+ The package includes the command line tool and its model configuration catalog.

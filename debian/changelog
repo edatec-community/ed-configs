@@ -1,0 +1,5 @@
+ed-config (1.0.0) unstable; urgency=medium
+
+  * Initial 1.0.0 release, packaging the current ed-config source and catalog.
+
+ -- EDATEC Community <ed-config@edatec.cn>  Mon, 09 Nov 2026 16:00:00 +0800

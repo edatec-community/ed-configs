@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
@@ -33,17 +32,10 @@ def commands_digest(commands: list[str], scope: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def run_family_commands(commands: list[str], root: Path) -> None:
-    root = root.resolve()
+def run_family_commands(commands: list[str]) -> None:
     for index, command in enumerate(commands, start=1):
         try:
-            if root == Path("/"):
-                subprocess.run(command, shell=True, executable="/bin/sh", check=True)
-            else:
-                subprocess.run(
-                    ["chroot", str(root), "/bin/sh", "-c", command],
-                    check=True,
-                )
+            subprocess.run(command, shell=True, executable="/bin/sh", check=True)
         except subprocess.CalledProcessError as exc:
             raise OSError(
                 f"family command {index} failed with exit status {exc.returncode}"
