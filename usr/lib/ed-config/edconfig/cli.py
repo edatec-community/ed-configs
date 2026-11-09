@@ -10,6 +10,7 @@ from . import __version__
 from .catalog import Catalog
 from .errors import ConfigError
 from .system import apply_request, read_status, record_apply_failure
+from .terminal import colorize
 
 
 def _json(value: Any, stream: Any = sys.stdout) -> None:
@@ -24,6 +25,8 @@ def _options(args: argparse.Namespace) -> list[str]:
         values.append("camera")
     if args.lte:
         values.append(f"lte.{args.lte}")
+    if args.lora:
+        values.append(f"lora.{args.lora}")
     if args.supercapacitor:
         values.append("supercapacitor")
     if args.ddr:
@@ -37,6 +40,9 @@ def _option_label(options: list[str]) -> str:
         "camera": "Camera",
         "lte.4g": "4G LTE",
         "lte.5g": "5G LTE",
+        "lora.470": "LoRa 470 MHz",
+        "lora.868": "LoRa 868 MHz",
+        "lora.915": "LoRa 915 MHz",
         "supercapacitor": "Supercapacitor",
         "ddr": "DDR",
     }
@@ -74,10 +80,28 @@ def parser() -> argparse.ArgumentParser:
         help="specify the LTE hardware installed in the device",
     )
     apply.add_argument(
+        "-L",
+        "--lora",
+        choices=("470", "868", "915"),
+        help="specify the LoRa frequency installed in GWL2010/GWL2110",
+    )
+    apply.add_argument(
         "-s",
         "--supercapacitor",
         action="store_true",
         help="indicate that the device includes a supercapacitor",
+    )
+    apply.add_argument(
+        "-i",
+        "--install-tools",
+        action="store_true",
+        help="install the tool packages declared for this family or model",
+    )
+    apply.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="confirm tool package installation without prompting",
     )
     apply.add_argument("-j", "--json", action="store_true", help="print machine-readable JSON")
     apply.add_argument("-r", "--root", type=Path, default=Path("/"), help=argparse.SUPPRESS)
@@ -94,9 +118,9 @@ def parser() -> argparse.ArgumentParser:
 
 def _print_apply(result: dict[str, Any]) -> None:
     if result["changed"]:
-        print("Configuration applied successfully.\n")
+        print(colorize("Configuration applied successfully.", "green", sys.stdout) + "\n")
     else:
-        print("Configuration is already up to date.\n")
+        print(colorize("Configuration is already up to date.", "green", sys.stdout) + "\n")
     print(f"Model:        {result['model']}")
     print(f"Product code: {result['product_code_hex']}")
     print(f"Options:      {_option_label(result['options'])}")
@@ -105,9 +129,9 @@ def _print_apply(result: dict[str, Any]) -> None:
         for path in result["changed_files"]:
             print(f"  {path}")
     if result["reboot_required"]:
-        print("\nA reboot is required.")
+        print("\n" + colorize("A reboot is required.", "yellow", sys.stdout))
     else:
-        print("\nNo reboot is required.")
+        print("\n" + colorize("No reboot is required.", "yellow", sys.stdout))
 
 
 def _public_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -224,7 +248,14 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
                 print("\n".join(models))
         elif args.command == "apply":
             apply_request_started = True
-            value = apply_request(catalog, args.model, _options(args), args.root)
+            value = apply_request(
+                catalog,
+                args.model,
+                _options(args),
+                args.root,
+                args.install_tools,
+                args.yes,
+            )
             if args.json:
                 _json(value)
             else:
@@ -236,7 +267,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
             else:
                 _print_status(value)
         elif args.command == "version":
-            value = {"version": __version__, "catalog_schema_version": 3}
+            value = {"version": __version__, "catalog_schema_version": 4}
             if args.json:
                 _json(value)
             else:

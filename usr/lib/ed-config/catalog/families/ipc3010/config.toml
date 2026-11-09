@@ -1,0 +1,5 @@
+format = "ed-config-family"
+version = 1
+id = "ipc3010"
+platform = "PI5"
+config_lines = ["dtoverlay=dwc2,dr_mode=host"]

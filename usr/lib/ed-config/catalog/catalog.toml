@@ -1,6 +1,7 @@
 format = "ed-config-catalog"
-version = 3
+version = 4
 models_file = "models.toml"
+tool_packages_file = "tool-packages.toml"
 families_dir = "families"
 options_file = "options.toml"
 codes_file = "hardware/codes.toml"

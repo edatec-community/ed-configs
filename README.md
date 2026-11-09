@@ -19,6 +19,7 @@ sudo ed-config apply -m IPC1100
 sudo ed-config apply -m IPC1200
 sudo ed-config apply -m IPC1220
 sudo ed-config apply -m IPC1220 -l 4g
+sudo ed-config apply -m GWL2010 -L 470
 ```
 
 型号名称不区分大小写，下面的命令效果相同：
@@ -34,7 +35,10 @@ sudo ed-config apply -m ipc2130
 -c, --camera               启用摄像头
 -d, --ddr                  声明 IPC2210/IPC2220 安装 DDR，并处理检测到的 SATA USB 存储设备
 -l, --lte 4g|5g            声明设备安装的 LTE 硬件类型
+-L, --lora 470|868|915     选择 GWL2010/GWL2110 的 LoRa 频段
 -s, --supercapacitor       声明设备包含超级电容
+-i, --install-tools        安装此配置系列声明的基础工具DEB包
+-y, --yes                  确认安装工具包时不再询问
 ```
 
 例如：
@@ -46,6 +50,10 @@ sudo ed-config apply -m IPC2130 -w -c -l 4g -s
 sudo ed-config apply -m IPC2210 -d
 sudo ed-config apply -m IPC2500
 sudo ed-config apply -m IPC1200 -l 4g
+sudo ed-config apply -m GWL2010 -L 470
+sudo ed-config apply -m GWL2110 -L 915
+sudo ed-config apply -m IPC2130 -i
+sudo ed-config apply -m IPC2130 -i -y
 ```
 
 每次执行都以本次参数为最终配置。没有指定的可选功能会保持关闭。
@@ -53,11 +61,19 @@ sudo ed-config apply -m IPC1200 -l 4g
 `-d`只接受IPC2210和IPC2220，只控制运行时配置，不改变`PRODUCT`编码。检测到SATA USB存储设备时，工具读取设备VID/PID并将对应的`usb-storage.quirks=<VID>:<PID>:u`写入cmdline；不会固定写入某个设备ID。
 
 `-s`只用于准确生成产品编码，不会使能硬件模块。`-l`声明设备上安装的LTE硬件并生成产品编码。
-IPC1100、IPC1200和IPC1220目前只支持`-l 4g`；指定后才会加入EC800程序及服务。
+
+`-L`只接受GWL2010和GWL2110；选择频段会自动安装对应的`ed-gw1302-470`、`ed-gw1302-868`或`ed-gw1302-915`包，不改变`PRODUCT`编码。
 
 `dtparam=ant2`由Wi-Fi选项`-w`控制。
 
-IPC1200/IPC1220省略`-l`时只配置基础启动项、串口udev规则及ed-init服务。
+`tool-packages.toml`按DEB包名集中登记安装目标，可分别绑定Family、具体型号和硬件选项。Family及型号绑定由`-i`触发；选项绑定随对应参数自动生效。
+
+`-l 4g`或`-l 5g`会自动选择`ed-clte`，`-s`会自动选择`ed-lvd`，无需同时指定`-i`。
+
+`-L`会自动选择对应的LoRa频段包，无需同时指定`-i`
+
+
+本次实际安装了工具包，或配置变更涉及需要重启的项目时，会提示重启。包已安装且没有需要重启的配置变化时，不会要求重启。
 
 受管服务通过systemd启用链接加入下次启动；应用完成后按命令提示重启，当前会话不会自动启动服务。
 

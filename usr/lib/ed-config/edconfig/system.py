@@ -16,17 +16,16 @@ from typing import Any, Iterator
 
 from .catalog import Catalog
 from .errors import ApplyError, ConfigError
+from .operations import commands_digest, run_family_commands
 from .screen import managed_paths as screen_managed_paths
 from .screen import operations as screen_operations
+from .tool_packages import install_tool_packages
 
 
 BEGIN = "# BEGIN EDATEC MANAGED CONFIG"
 END = "# END EDATEC MANAGED CONFIG"
 BOOT_CONFIG_PATH = "/boot/firmware/config.txt"
 RELEASE_PATH = "/etc/ed-release"
-DPKG = "/usr/bin/dpkg"
-DPKG_DEB = "/usr/bin/dpkg-deb"
-DPKG_QUERY = "/usr/bin/dpkg-query"
 ALSACTL = "/usr/sbin/alsactl"
 _ALSA_STATE_HEADER = re.compile(r"^state\.([^\s{]+)\s*\{\s*$")
 _USB_ID = re.compile(r"^[0-9a-f]{4}:[0-9a-f]{4}$", re.IGNORECASE)
@@ -651,52 +650,6 @@ def _symlink_target(path: Path) -> str | None:
         return None
 
 
-def _deb_field(path: Path, field: str) -> str:
-    try:
-        result = subprocess.run(
-            [DPKG_DEB, "-f", str(path), field],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ApplyError(f"cannot inspect local package {path}: {exc}") from exc
-    value = result.stdout.strip()
-    if not value:
-        raise ApplyError(f"local package {path} has no {field} metadata")
-    return value
-
-
-def _package_missing(path: Path) -> bool:
-    name = _deb_field(path, "Package")
-    version = _deb_field(path, "Version")
-    try:
-        result = subprocess.run(
-            [DPKG_QUERY, "-W", "-f=" + "${Status} ${Version}", name],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError as exc:
-        raise ApplyError(f"cannot inspect installed package {name}: {exc}") from exc
-    return result.returncode != 0 or result.stdout.strip() != f"install ok installed {version}"
-
-
-def _install_local_packages(paths: list[str]) -> None:
-    try:
-        subprocess.run(
-            [DPKG, "--install", *paths], check=True, capture_output=True, text=True
-        )
-    except OSError as exc:
-        raise ApplyError(f"cannot run local package installer: {exc}") from exc
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip()
-        raise ApplyError(
-            "local audio package installation failed; no network dependency repair was attempted"
-            + (f": {detail}" if detail else "")
-        ) from exc
-
-
 def _restore_alsa_state(card_names: list[str], skip_ucm_cards: set[str] | None = None) -> None:
     for card_name in card_names:
         command = [ALSACTL]
@@ -743,8 +696,18 @@ def build_plan(
     root: Path,
     os_name: str = "auto",
     detected_usb_storage_quirks: list[str] | None = None,
+    install_tools: bool = False,
+    assume_yes: bool = False,
 ) -> dict[str, Any]:
     root = root.resolve()
+    packages_to_install = (
+        list(resolution.get("tool_debs", [])) if install_tools else []
+    )
+    for package in resolution.get("option_debs", []):
+        if package not in packages_to_install:
+            packages_to_install.append(package)
+    if packages_to_install and root != Path("/"):
+        raise ConfigError("package installation requires --root /")
     if os_name not in {"auto", "ubuntu", "raspberrypi"}:
         raise ConfigError(f"unsupported OS selection: {os_name}")
     ubuntu = _detect_ubuntu(root) if os_name == "auto" else os_name == "ubuntu"
@@ -784,17 +747,15 @@ def build_plan(
     alsa_file_originals: dict[str, str | None] = {}
     managed_alsa_targets: dict[str, str] = {}
 
-    package_paths = [Path(item) for item in resolution.get("audio_packages", [])]
-    if root == Path("/") and package_paths:
-        missing = [path for path in package_paths if _package_missing(path)]
-        if missing:
-            operations.append({
-                "kind": "packages",
-                "action": "install",
-                "path": "/var/lib/ed-config/packages/audio",
-                "changed": True,
-                "_packages": [str(path) for path in missing],
-            })
+    if packages_to_install:
+        operations.append({
+            "kind": "tool_packages",
+            "action": "install",
+            "path": "tool-debs",
+            "changed": True,
+            "_packages": packages_to_install,
+            "_assume_yes": assume_yes,
+        })
 
     def write_operation(
         kind: str,
@@ -881,6 +842,21 @@ def build_plan(
                 write_operation("cmdline", cmdline_path, cmdline_content)
         elif not ddr_selected:
             managed_usb_quirks = set()
+
+    family_commands = list(resolution.get("commands", []))
+    family_commands_hash = (
+        commands_digest(family_commands, str(resolution["model"]))
+        if family_commands else None
+    )
+    if family_commands_hash and previous_current.get("family_commands_sha256") != family_commands_hash:
+        operations.append({
+            "kind": "family_command",
+            "action": "execute",
+            "path": "family-commands",
+            "changed": True,
+            "_commands": family_commands,
+            "_commands_sha256": family_commands_hash,
+        })
 
     selected_rules: set[str] = set()
     managed_rule_contents = _catalog_rule_contents(catalog)
@@ -1409,7 +1385,7 @@ def build_plan(
         "product_code": resolution["product_code"],
         "reboot_required": any(
             op["changed"] and op["kind"] in {
-                "config", "cmdline", "udev", "managed_file", "systemd", "wireplumber", "alsa_profile", "alsa_config", "alsa",
+                "config", "cmdline", "family_command", "udev", "managed_file", "systemd", "wireplumber", "alsa_profile", "alsa_config", "alsa",
             }
             for op in operations
         ),
@@ -1514,7 +1490,7 @@ def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:
         op for op in operations
         if (
             (op["changed"] or op.get("_backup_required"))
-            and op["kind"] != "packages"
+            and op["kind"] not in {"packages", "tool_packages"}
             and op.get("_target") is not None
             and (os.path.lexists(op["_target"]) if op["kind"] == "systemd" else op["_target"].exists())
         )
@@ -1585,7 +1561,7 @@ def _operation_paths(operations: list[dict[str, Any]]) -> list[str]:
     return sorted({
         str(operation["path"])
         for operation in operations
-        if operation.get("changed")
+        if operation.get("changed") and operation.get("kind") != "tool_packages"
     })
 
 
@@ -1595,9 +1571,9 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
     attempted_at = datetime.now(timezone.utc).isoformat()
     planned_paths = _operation_paths(plan["operations"])
     planned_packages = sorted({
-        Path(package).name
+        package
         for operation in plan["operations"]
-        if operation.get("changed") and operation.get("kind") == "packages"
+        if operation.get("changed") and operation.get("kind") == "tool_packages"
         for package in operation.get("_packages", [])
     })
     last_apply: dict[str, Any] = {
@@ -1622,12 +1598,22 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
     phase = "backup"
     try:
         backup_dir = _backup(root, plan["operations"])
-        ordered = sorted(plan["operations"], key=lambda op: op["kind"] == "release")
+        ordered = sorted(
+            plan["operations"],
+            key=lambda op: (op["kind"] == "release", op["kind"] == "family_command"),
+        )
         phase = "apply"
         for operation in ordered:
             if not operation["changed"]:
                 continue
             active_operation = operation
+            if operation["kind"] == "tool_packages":
+                operation["_installed_packages"] = install_tool_packages(
+                    operation["_packages"],
+                    assume_yes=operation.get("_assume_yes", False),
+                )
+                completed.append(operation)
+                continue
             next_attempted = list(attempted_paths)
             if operation["path"] not in next_attempted:
                 next_attempted.append(operation["path"])
@@ -1637,8 +1623,8 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
             _write_state_document(root, configured_before, current_before, in_progress)
             last_apply = in_progress
             attempted_paths = next_attempted
-            if operation["kind"] == "packages":
-                _install_local_packages(operation["_packages"])
+            if operation["kind"] == "family_command":
+                run_family_commands(operation["_commands"], root)
                 completed.append(operation)
                 continue
             if operation["kind"] == "alsa_restore":
@@ -1667,18 +1653,28 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
 
         phase = "state_commit"
         completed_at = datetime.now(timezone.utc).isoformat()
+        reboot_required = bool(plan["reboot_required"] or any(
+            operation.get("kind") == "tool_packages"
+            and operation.get("_installed_packages")
+            for operation in plan["operations"]
+        ))
         current = {
             "model": plan["model"],
             "options": plan["options"],
             "product_code": plan["product_code"],
             "applied_at": completed_at,
-            "reboot_required": plan["reboot_required"],
+            "reboot_required": reboot_required,
             "catalog_digest": plan["_resolution"]["catalog_digest"],
             "managed_rule_files": sorted(
                 op["path"] for op in plan["operations"]
                 if op["kind"] == "udev" and op["action"] == "write"
             ),
         }
+        family_commands = plan["_resolution"].get("commands", [])
+        if family_commands:
+            current["family_commands_sha256"] = commands_digest(
+                list(family_commands), str(plan["model"])
+            )
         managed_usb_quirks = plan.get("_managed_usb_storage_quirks", [])
         if managed_usb_quirks:
             current["managed_usb_storage_quirks"] = managed_usb_quirks
@@ -1797,7 +1793,13 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
         _write_state_document(root, True, current, last_apply)
         return {
             "success": True,
-            "changed": any(op["changed"] for op in plan["operations"]),
+            "changed": any(
+                op["changed"] and op["kind"] != "tool_packages"
+                for op in plan["operations"]
+            ) or any(
+                op.get("kind") == "tool_packages" and op.get("_installed_packages")
+                for op in plan["operations"]
+            ),
             "model": plan["model"],
             "options": plan["options"],
             "product_code": plan["product_code"],
@@ -1805,14 +1807,16 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
             "changed_files": [
                 op["path"]
                 for op in plan["operations"]
-                if op["changed"] and op["kind"] != "alsa_restore"
+                if op["changed"] and op["kind"] not in {
+                    "alsa_restore", "tool_packages", "family_command"
+                }
             ],
-            "reboot_required": plan["reboot_required"],
+            "reboot_required": reboot_required,
         }
     except (OSError, ConfigError) as exc:
         rollback_errors: list[str] = []
         for applied in reversed(completed):
-            if applied["kind"] == "packages" or applied.get("_target") is None:
+            if applied["kind"] in {"packages", "tool_packages"} or applied.get("_target") is None:
                 continue
             target = applied["_target"]
             original = applied.get("_original")
@@ -1879,12 +1883,33 @@ def apply_request(
     requested_model: str,
     option_names: list[str],
     root: Path,
+    install_tools: bool = False,
+    assume_yes: bool = False,
 ) -> dict[str, Any]:
     root = root.resolve()
-    with _lock(root):
+    resolution = None
+    if root != Path("/"):
         try:
             resolution = catalog.resolve_model(requested_model, option_names)
-            plan = build_plan(catalog, resolution, root)
+        except ConfigError:
+            pass
+        else:
+            requested_packages = list(resolution.get("option_debs", []))
+            if install_tools:
+                requested_packages.extend(resolution.get("tool_debs", []))
+            if requested_packages:
+                raise ConfigError("package installation requires --root /")
+    with _lock(root):
+        try:
+            if resolution is None:
+                resolution = catalog.resolve_model(requested_model, option_names)
+            plan = build_plan(
+                catalog,
+                resolution,
+                root,
+                install_tools=install_tools,
+                assume_yes=assume_yes,
+            )
         except (ConfigError, OSError) as exc:
             _record_failure_locked(root, requested_model, str(exc))
             raise

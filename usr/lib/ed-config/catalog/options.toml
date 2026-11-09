@@ -30,3 +30,18 @@ code_shift = 4
 code_width = 2
 code_value = 2
 exclusive_group = "lte"
+
+[options."lora.470"]
+config_only = true
+exclusive_group = "lora"
+models = ["GWL2010", "GWL2110"]
+
+[options."lora.868"]
+config_only = true
+exclusive_group = "lora"
+models = ["GWL2010", "GWL2110"]
+
+[options."lora.915"]
+config_only = true
+exclusive_group = "lora"
+models = ["GWL2010", "GWL2110"]

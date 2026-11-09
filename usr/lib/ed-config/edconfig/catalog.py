@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError
+from .operations import parse_family_commands
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -57,7 +58,6 @@ class Catalog:
         "alsa_profile_set_target",
         "alsa_profile_path_files",
         "alsa_profile_path_targets",
-        "audio_packages",
     }
     _RULE_FIELDS = {"path", "content_file", "default_file", "ubuntu_file", "exact_content"}
     _MANAGED_FILE_FIELDS = {"path", "content_file", "mode", "option"}
@@ -67,9 +67,15 @@ class Catalog:
         self.directory = directory.resolve()
         self.manifest_path = self.directory / "catalog.toml"
         self.manifest = _read_toml(self.manifest_path)
+        legacy_model_packages = self.directory / "model-tool-debs.toml"
+        if legacy_model_packages.exists() or legacy_model_packages.is_symlink():
+            raise ConfigError(
+                f"{legacy_model_packages} is obsolete; declare package targets "
+                "in tool-packages.toml"
+            )
         if (
             self.manifest.get("format") != "ed-config-catalog"
-            or self.manifest.get("version") != 3
+            or self.manifest.get("version") != 4
         ):
             raise ConfigError("unsupported catalog format or version")
 
@@ -89,13 +95,16 @@ class Catalog:
 
         self.data_paths: set[Path] = {self.manifest_path}
         self.family_directories: dict[str, Path] = {}
+        self.family_commands: dict[str, list[str]] = {}
         self.systemd_service_targets: dict[str, str] = {}
         self.systemd_service_links: dict[str, str] = {}
         self.models_path, models = self._load_file("models_file")
+        self.tool_packages_path, tool_packages = self._load_file("tool_packages_file")
         self.options_path, options = self._load_file("options_file")
         self.codes_path, self.codes = self._load_file("codes_file")
         for path, document in (
             (self.models_path, models),
+            (self.tool_packages_path, tool_packages),
             (self.options_path, options),
             (self.codes_path, self.codes),
         ):
@@ -103,9 +112,9 @@ class Catalog:
                 raise ConfigError(f"{path}: unsupported version")
 
         self.models = _entries(models, "models", self.models_path)
+        self.model_index = self._entry_index(self.models, "name", "model")
         self.options = self._table(options, "options", self.options_path)
         self.families = self._load_families()
-        self.model_index = self._entry_index(self.models, "name", "model")
         self.family_index = {
             family_id.casefold(): (family_id, family)
             for family_id, family in self.families.items()
@@ -113,7 +122,99 @@ class Catalog:
         self.option_index = {
             str(name).casefold(): (str(name), value) for name, value in self.options.items()
         }
+        self.tool_packages = self._load_tool_packages(
+            tool_packages, self.tool_packages_path
+        )
         self._validate()
+
+    def _load_tool_packages(
+        self, document: dict[str, Any], path: Path
+    ) -> dict[str, dict[str, list[str]]]:
+        if set(document) != {"version", "packages"}:
+            raise ConfigError(f"{path} must contain only version and packages")
+        entries = document["packages"]
+        if not isinstance(entries, dict):
+            raise ConfigError(f"{path}: packages must be a table")
+        if not entries:
+            raise ConfigError(f"{path}: packages table must not be empty")
+        result: dict[str, dict[str, list[str]]] = {}
+        folded_packages: set[str] = set()
+        scopes = {
+            "families": (self.family_index, "family"),
+            "models": (self.model_index, "model"),
+            "options": (self.option_index, "option"),
+        }
+        for raw_name, raw_targets in entries.items():
+            if not isinstance(raw_name, str) or not self._valid_package_names([raw_name]):
+                raise ConfigError(f"{path}: invalid package name {raw_name!r}")
+            package_key = raw_name.casefold()
+            if package_key in folded_packages:
+                raise ConfigError(f"{path}: duplicate package name {raw_name!r}")
+            folded_packages.add(package_key)
+            if not isinstance(raw_targets, dict) or not raw_targets:
+                raise ConfigError(
+                    f"{path}: package {raw_name} must declare families, models, or options"
+                )
+            unknown_scopes = sorted(set(raw_targets) - set(scopes))
+            if unknown_scopes:
+                raise ConfigError(
+                    f"{path}: package {raw_name} has unknown target scopes: "
+                    f"{', '.join(str(scope) for scope in unknown_scopes)}"
+                )
+            targets: dict[str, list[str]] = {}
+            for scope, values in raw_targets.items():
+                if (
+                    not isinstance(values, list)
+                    or not values
+                    or any(not isinstance(value, str) or not value for value in values)
+                ):
+                    raise ConfigError(
+                        f"{path}: {scope} for {raw_name} must be a non-empty array of names"
+                    )
+                index, kind = scopes[scope]
+                canonical: list[str] = []
+                seen: set[str] = set()
+                for raw_value in values:
+                    folded = raw_value.casefold()
+                    if folded in seen:
+                        raise ConfigError(
+                            f"{path}: duplicate {kind} target {raw_value!r} for {raw_name}"
+                        )
+                    seen.add(folded)
+                    found = index.get(folded)
+                    if found is None:
+                        raise ConfigError(
+                            f"{path}: unknown {kind} target {raw_value!r} for {raw_name}"
+                        )
+                    if kind == "family":
+                        canonical.append(found[0])
+                    elif kind == "model":
+                        canonical.append(str(found["name"]))
+                    else:
+                        canonical.append(found[0])
+                targets[scope] = canonical
+            result[raw_name] = targets
+        return result
+
+    def _base_tool_packages(
+        self, model: dict[str, Any], family_id: str
+    ) -> list[str]:
+        model_key = str(model["name"]).casefold()
+        family_key = family_id.casefold()
+        return [
+            package
+            for package, targets in self.tool_packages.items()
+            if family_key in {item.casefold() for item in targets.get("families", [])}
+            or model_key in {item.casefold() for item in targets.get("models", [])}
+        ]
+
+    def _option_tool_packages(self, option_names: list[str]) -> list[str]:
+        selected = {name.casefold() for name in option_names}
+        return [
+            package
+            for package, targets in self.tool_packages.items()
+            if selected.intersection(item.casefold() for item in targets.get("options", []))
+        ]
 
     def _manifest_location(self, field: str, kind: str) -> Path:
         raw = self.manifest.get(field)
@@ -151,6 +252,12 @@ class Catalog:
             family_id = family.get("id")
             if not isinstance(family_id, str) or not family_id:
                 raise ConfigError(f"{config_path}: id must be a non-empty string")
+            old_tool_debs_path = package_dir / "tool-debs.toml"
+            if old_tool_debs_path.exists() or old_tool_debs_path.is_symlink():
+                raise ConfigError(
+                    f"{old_tool_debs_path} is obsolete; declare package targets "
+                    "in tool-packages.toml"
+                )
             folded = family_id.casefold()
             if folded in index:
                 raise ConfigError(f"duplicate family package id: {family_id}")
@@ -158,7 +265,36 @@ class Catalog:
             result[family_id] = family
             self.family_directories[folded] = package_dir.resolve()
             self.data_paths.add(config_path.resolve())
+            self.family_commands[folded] = self._load_family_commands(
+                family_id, package_dir
+            )
         return result
+
+    def _load_family_commands(
+        self, family_id: str, package_dir: Path
+    ) -> list[str]:
+        path = package_dir / "commands.toml"
+        if not path.exists() and not path.is_symlink():
+            return []
+        resolved_path = path.resolve()
+        if package_dir.resolve() not in resolved_path.parents or not resolved_path.is_file():
+            raise ConfigError(f"family package {family_id} has an unsafe commands.toml")
+        document = _read_toml(resolved_path)
+        result = parse_family_commands(document, resolved_path)
+        self.data_paths.add(resolved_path)
+        return result
+
+    @staticmethod
+    def _valid_package_names(value: Any) -> bool:
+        return (
+            isinstance(value, list)
+            and all(
+                isinstance(package, str)
+                and re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", package)
+                for package in value
+            )
+            and len(set(value)) == len(value)
+        )
 
     @staticmethod
     def _table(
@@ -416,21 +552,6 @@ class Catalog:
                 family["wireplumber_modern_file"],
                 f"family package {family_id} wireplumber_modern_file",
             )
-        if "audio_packages" in family:
-            packages = family["audio_packages"]
-            if not isinstance(packages, list) or not packages or not all(
-                isinstance(item, str) and item and not Path(item).is_absolute()
-                for item in packages
-            ):
-                raise ConfigError(
-                    f"family package {family_id} audio_packages must be non-empty relative paths"
-                )
-            for package in packages:
-                self._rule_file(
-                    self.family_directories[family_id.casefold()],
-                    package,
-                    f"family package {family_id} audio package",
-                )
         managed_files = family.get("managed_files", [])
         if not isinstance(managed_files, list):
             raise ConfigError(f"family package {family_id} managed_files must be an array")
@@ -603,6 +724,10 @@ class Catalog:
 
     def _validate_options(self) -> None:
         for name, option in self.options.items():
+            if "debs" in option:
+                raise ConfigError(
+                    f"option {name} has obsolete debs; declare packages in tool-packages.toml"
+                )
             has_bit = "code_bit" in option
             has_field = all(
                 key in option for key in ("code_shift", "code_width", "code_value")
@@ -821,6 +946,7 @@ class Catalog:
                     values.add(line)
                     next_order += 1
         self._validate_config_lines(str(model["name"]), [item["value"] for item in lines])
+        option_debs = self._option_tool_packages(options)
         rules = [
             self._materialize_rule(family_id, rule)
             for rule in family.get("udev_rules", [])
@@ -836,16 +962,6 @@ class Catalog:
                 return (package_dir / str(raw)).read_text(encoding="utf-8")
             except OSError as exc:
                 raise ConfigError(f"cannot read {field} for family {family_id}: {exc}") from exc
-
-        def family_path_list(field: str) -> list[str]:
-            values = family.get(field, [])
-            result: list[str] = []
-            for raw in values:
-                path = self._rule_file(
-                    package_dir, raw, f"family package {family_id} {field}"
-                )
-                result.append(str(path))
-            return result
 
         managed_files = []
         for asset in family.get("managed_files", []):
@@ -882,6 +998,7 @@ class Catalog:
             },
             "options": options,
             "product_code": self._identity_code(model, options),
+            "option_debs": option_debs,
             "screen_config": family.get("desktop_config"),
             "screen_goodix_touch_devices": list(
                 family.get("goodix_touch_devices", [])
@@ -912,7 +1029,8 @@ class Catalog:
                 }
                 for index, path in enumerate(family.get("alsa_profile_path_files", []))
             ],
-            "audio_packages": family_path_list("audio_packages"),
+            "tool_debs": self._base_tool_packages(model, family_id),
+            "commands": list(self.family_commands.get(family_id.casefold(), [])),
             "managed_files": managed_files,
             "systemd_services": [
                 service

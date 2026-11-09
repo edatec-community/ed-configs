@@ -5,7 +5,7 @@ platform = "CM4"
 
 config_lines = [
   "dtparam=i2c_arm=on",
-  "dtoverlay=ed-ipc,ipc2100,exp4x4y",
+  "dtoverlay=ed-ipc,ipc2100,exp8x8y",
   "dtoverlay=uart2",
   "dtoverlay=uart3",
   "dtoverlay=uart4",

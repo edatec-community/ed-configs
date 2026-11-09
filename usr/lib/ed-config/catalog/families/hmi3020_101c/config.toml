@@ -13,13 +13,6 @@ alsa_state_target = "/var/lib/alsa/asound.state"
 alsa_state_blocks = ["rt5616codec"]
 alsa_restore_skip_ucm_blocks = ["rt5616codec"]
 wireplumber_legacy_hashes = ["d059ce52bf02342fd0aae9625edc791af04f842dc742ae68ed5e13e628011775", "1353a1f1aad23ff592a4a397e658bcce37d35308fdb0d90898e3cc89d1cd3fe9"]
-audio_packages = [
-  "packages/audio/libasound2-plugins_1.2.12-2+b1_arm64.deb",
-  "packages/audio/libpulsedsp_17.0+dfsg1-2+rpt1_arm64.deb",
-  "packages/audio/pulseaudio-utils_17.0+dfsg1-2+rpt1_arm64.deb",
-  "packages/audio/pulseaudio_17.0+dfsg1-2+rpt1_arm64.deb",
-]
-
 config_lines = [
   "dtoverlay=vc4-kms-dsi-edatec-panel-101c,interrupt=17",
   "dtoverlay=uart2-pi5",

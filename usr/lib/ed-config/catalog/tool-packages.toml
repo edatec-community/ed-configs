@@ -1,0 +1,85 @@
+version = 1
+
+[packages]
+
+[packages.ed-reboot]
+families = [
+    "cm4ind", "cm4media", "cm4nano", "cm4sen", "gwl2010", "gwl2110",
+    "hmi2020_070c", "hmi2020_101c", "hmi2120_070c", "hmi2120_101c",
+    "hmi2220_070c", "hmi2220_101c", "hmi2630_101c", "hmi3010_070c",
+    "hmi3010_101c", "hmi3020_070c", "hmi3020_101c", "hmi3120_070c",
+    "hmi3120_101c", "hmi3630_101c", "ipc1000", "ipc1100", "ipc1200",
+    "ipc1220", "ipc2010", "ipc2100", "ipc2200", "ipc2400", "ipc2610",
+    "ipc2620", "ipc2630", "ipc3020", "ipc3100", "ipc3200", "ipc3400",
+    "ipc3600", "plc2010", "sbc2300", "sbc3300",
+]
+
+[packages.ed-rtc]
+families = [
+    "cm4ind", "cm4media", "cm4nano", "cm4sen", "gwl2110", "hmi2020_070c",
+    "hmi2020_101c", "hmi2120_070c", "hmi2120_101c", "hmi2220_070c",
+    "hmi2220_101c", "hmi2630_101c", "hmi3020_070c", "hmi3020_101c",
+    "hmi3120_070c", "hmi3120_101c", "hmi3630_101c", "ipc1000", "ipc1100",
+    "ipc1200", "ipc1220", "ipc2010", "ipc2100", "ipc2200", "ipc2400",
+    "ipc2610", "ipc2620", "ipc2630", "ipc3020", "ipc3100", "ipc3200",
+    "ipc3600", "plc2010", "sbc2300", "sbc3300",
+]
+
+[packages.ed-usb-tools]
+families = [
+    "cm4sen", "hmi2120_070c", "hmi2120_101c", "hmi2630_101c",
+    "hmi3120_070c", "hmi3120_101c", "hmi3630_101c", "ipc1100", "ipc1200",
+    "ipc1220", "ipc2100", "ipc2610", "ipc2620", "ipc2630", "ipc3100",
+    "ipc3600",
+]
+
+[packages.ed-wk2xxx-uart-firmware]
+families = ["ipc1200", "ipc1220", "sbc2300", "sbc3300"]
+
+[packages.ed-mgmt]
+families = ["ipc1200", "ipc1220"]
+
+[packages.ed-panel-button]
+families = ["plc2010"]
+
+[packages.ed-adc]
+models = ["IPC1220"]
+
+[packages.chirpstack-gateway-bridge]
+families = ["gwl2010", "gwl2110"]
+
+[packages.libasound2-plugins]
+families = ["hmi3020_070c", "hmi3020_101c", "ipc3020"]
+
+[packages.libpulsedsp]
+families = ["hmi3020_070c", "hmi3020_101c", "ipc3020"]
+
+[packages.pulseaudio-utils]
+families = ["hmi3020_070c", "hmi3020_101c", "ipc3020"]
+
+[packages.pulseaudio]
+families = ["hmi3020_070c", "hmi3020_101c", "ipc3020"]
+
+[packages.ed-ddcci-mib-tool]
+models = [
+    "HMI3010_116C", "HMI3010_133C", "HMI3010_156C", "HMI3010_185C",
+    "HMI3010_215C", "HMI3120_116C", "HMI3120_133C", "HMI3120_156C",
+    "HMI3120_185C", "HMI3120_215C", "HMI3632_116C", "HMI3632_133C",
+    "HMI3632_156C", "HMI3633_116C", "HMI3633_133C", "HMI3633_156C",
+    "HMI3634_116C", "HMI3634_133C", "HMI3634_156C",
+]
+
+[packages.ed-clte]
+options = ["lte.4g", "lte.5g"]
+
+[packages.ed-lvd]
+options = ["supercapacitor"]
+
+[packages.ed-gw1302-470]
+options = ["lora.470"]
+
+[packages.ed-gw1302-868]
+options = ["lora.868"]
+
+[packages.ed-gw1302-915]
+options = ["lora.915"]

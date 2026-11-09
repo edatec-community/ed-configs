@@ -1,0 +1,4 @@
+commands = [
+    '''sed -i '/^\[Zram\]/,/^\[/ s/^#FixedSizeMiB\s*=.*/FixedSizeMiB=1024/' /etc/rpi/swap.conf''',
+    '''sudo sed -i 's/console=serial0,115200 //g' /boot/firmware/cmdline.txt''',
+]

@@ -540,6 +540,46 @@ subboard = "None"
 screen = "H101C"
 
 [[models]]
+name = "HMI3010_116C"
+config = "ipc3010"
+platform = "PI5"
+board = "PI5"
+subboard = "None"
+screen = "M116C"
+
+[[models]]
+name = "HMI3010_133C"
+config = "ipc3010"
+platform = "PI5"
+board = "PI5"
+subboard = "None"
+screen = "M133C"
+
+[[models]]
+name = "HMI3010_156C"
+config = "ipc3010"
+platform = "PI5"
+board = "PI5"
+subboard = "None"
+screen = "M156C"
+
+[[models]]
+name = "HMI3010_185C"
+config = "ipc3010"
+platform = "PI5"
+board = "PI5"
+subboard = "None"
+screen = "M185C"
+
+[[models]]
+name = "HMI3010_215C"
+config = "ipc3010"
+platform = "PI5"
+board = "PI5"
+subboard = "None"
+screen = "M215C"
+
+[[models]]
 name = "HMI2002_070C"
 config = "hmi2002_070c"
 platform = "PI4"
