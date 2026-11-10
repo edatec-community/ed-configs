@@ -1,7 +1,8 @@
 Source: ed-bsp-config
 Section: admin
 Priority: optional
-Maintainer: EDATEC Community <ed-config@edatec.cn>
+Maintainer: zjzhao <zjzhao@edatec.cn>
+Uploaders: sxie <sxie@edatec.cn>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
