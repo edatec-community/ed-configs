@@ -16,7 +16,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-          token: ${{ secrets.SUBMODULE_READ_TOKEN || github.token }}
 
       - name: Install Debian packaging tools
         run: sudo apt-get update && sudo apt-get install --yes build-essential debhelper
@@ -46,6 +45,16 @@ jobs:
           mkdir -p dist
           mv "../ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" dist/
           dpkg-deb --info "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb"
+
+      - name: Verify packaged submodule contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          mkdir "$stage/source"
+          git -C ed-sn-analysis archive "$(git rev-parse HEAD:ed-sn-analysis)" | tar -x -C "$stage/source"
+          dpkg-deb -x "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" "$stage/package"
+          diff -r "$stage/source" "$stage/package/usr/lib/ed-config/ed-sn-analysis"
 
       - name: Create or update GitHub Release
         env:
