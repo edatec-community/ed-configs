@@ -1,0 +1,148 @@
+#!/usr/bin/python3
+"""Configure a device from a scanned or typed ordering code."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+INFORMATION_FIELDS = frozenset("""
+    audio case codesys color combined_memory_token cooling ddr ddr_emmc ddr_ssd
+    emmc focal hailo_or_ssd heatsink pi4_ddr poe polarizer power_connector region
+    rs232_count rs485_count sd serial ssd storage suffix tpm
+""".split())
+IDENTITY_FIELDS = {"model", "model_suffix", "screen"}
+LTE_4G = {"4", "4CN", "4CNG", "4US", "4EU", "4AU", "4EF", "4EM"}
+LORA = {"CN": "470", "EU": "868", "US": "915"}
+
+
+def paths():
+    script = Path(__file__).resolve()
+    for root in (script.parent, script.parent.parent.parent):
+        if not ((root / "ed-config").is_file() and (root / "usr/sbin/ed-config-order").is_file()):
+            continue
+        parser_dir = root / "ed-sn-analysis"
+        if not (parser_dir / "parse_order_code.py").is_file() and (root / ".gitmodules").is_file():
+            subprocess.run(
+                ["git", "-C", str(root), "submodule", "update", "--init", "--", "ed-sn-analysis"],
+                check=True,
+            )
+        return parser_dir, root / "ed-config"
+    return script.parent.parent / "lib/ed-config/ed-sn-analysis", script.with_name("ed-config")
+
+
+def parsed_order(directory, code):
+    for relative in ("parse_order_code.py", "scan_and_parse.py", "data/draft/product_code_parser.csv"):
+        path = directory / relative
+        if not path.is_file():
+            raise ValueError(f"missing ordering code parser file: {path}")
+    script_name = "scan_and_parse.py" if code is None else "parse_order_code.py"
+    command = [sys.executable, str(directory / script_name), "--strict"]
+    kwargs = {} if code is None else {"input": code}
+    result = subprocess.run(command, stdout=subprocess.PIPE, text=True, **kwargs)
+    if result.returncode in (130, -2):
+        raise KeyboardInterrupt
+    try:
+        data = json.loads(result.stdout)
+    except ValueError as exc:
+        raise ValueError(f"{script_name} returned no valid JSON (exit {result.returncode})") from exc
+    if not isinstance(data, dict):
+        raise ValueError("invalid parser response")
+    if result.returncode:
+        raise ValueError(data.get("error") or "ordering code parser failed")
+    order_code, fields = data.get("order_code"), data.get("configuration")
+    if not isinstance(order_code, str) or not isinstance(fields, dict) or not all(
+        isinstance(value, str) for value in fields.values()
+    ):
+        raise ValueError("invalid parser response")
+    return order_code, fields
+
+
+def resolve(order_code, fields):
+    match = re.match(r"ED-([A-Z][A-Z0-9]*)(?=-|$)", order_code)
+    if not match:
+        raise ValueError("unsupported product in ordering code: " + order_code)
+    model = match[1]
+    flags = []
+    if model.startswith("HMI"):
+        screen = re.match(r"-([0-9]{3})C", order_code[match.end():])
+        if not screen:
+            raise ValueError("missing screen variant for " + model)
+        model += "_" + screen[1] + "C"
+    if model == "IPC3020E":
+        model = "IPC3020"
+        flags.append("-w")
+    if model == "CM4SENP" and fields.get("power_connector") == "P":
+        model = "CM4SEN"
+    if model == "CM0NANO":
+        model = "IPC1000"
+    if model == "CM4MED10":
+        model = "CM4MEDIA"
+
+    information = []
+    errors = []
+    for key, value in sorted(fields.items()):
+        if key in IDENTITY_FIELDS:
+            continue
+        if key in INFORMATION_FIELDS:
+            information.append(f"{key}={value}")
+        elif key == "wifi" and value in {"0", "1"}:
+            if value == "1" and "-w" not in flags:
+                flags.append("-w")
+        elif key == "camera" and value == "C":
+            flags.append("-c")
+        elif key == "supercap" and value == "S":
+            flags.append("-s")
+        elif key in {"lte", "lte_digit"} and value in LTE_4G:
+            if "-l" not in flags:
+                flags.extend(("-l", "4g"))
+            elif "4g" not in flags:
+                errors.append(f"{key}={value} conflicts with 5G")
+        elif key == "5g" and value == "5GL" and model == "IPC2500":
+            if "-l" in flags:
+                errors.append("5g=5GL conflicts with LTE")
+            else:
+                flags.extend(("-l", "5g"))
+        elif key == "lora_region" and model in {"GWL2010", "GWL2110"} and value in LORA:
+            flags.extend(("-L", LORA[value]))
+        else:
+            errors.append(f"{key}={value}")
+    if errors:
+        raise ValueError("unmapped configuration: " + ", ".join(errors))
+    return model, flags, information
+
+
+def main():
+    cli = argparse.ArgumentParser(
+        description="Configure a device from an ordering code. Omit the code to scan or read stdin.",
+        allow_abbrev=False,
+    )
+    cli.add_argument("order_code", nargs="?")
+    cli.add_argument("-y", "--yes", action="store_true", help="install tool packages without prompting")
+    args = cli.parse_args()
+    try:
+        parser_dir, backend = paths()
+        order_code, fields = parsed_order(parser_dir, args.order_code)
+        model, flags, information = resolve(order_code, fields)
+        models = json.loads(subprocess.check_output([backend, "list", "-j"], text=True))["models"]
+        if model not in models:
+            raise ValueError(f"unsupported model {model}; run 'ed-config list' for supported models")
+        if information:
+            print("Order specifications outside ed-config: " + ", ".join(information), file=sys.stderr)
+        command = [str(backend), "apply", "-m", model, "-i", *flags]
+        if args.yes:
+            command.append("-y")
+        os.execv(backend, command)
+    except KeyboardInterrupt:
+        return 130
+    except (ValueError, OSError, subprocess.CalledProcessError) as exc:
+        print(f"ed-config-order: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

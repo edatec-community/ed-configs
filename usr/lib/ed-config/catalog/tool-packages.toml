@@ -62,6 +62,7 @@ families = ["hmi3020_070c", "hmi3020_101c", "ipc3020"]
 
 [packages.ed-ddcci-mib-tool]
 models = [
+    "HMI2002_116C",
     "HMI3010_116C", "HMI3010_133C", "HMI3010_156C", "HMI3010_185C",
     "HMI3010_215C", "HMI3120_116C", "HMI3120_133C", "HMI3120_156C",
     "HMI3120_185C", "HMI3120_215C", "HMI3632_116C", "HMI3632_133C",

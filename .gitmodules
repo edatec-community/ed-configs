@@ -1,0 +1,3 @@
+[submodule "ed-sn-analysis"]
+	path = ed-sn-analysis
+	url = https://github.com/edatec-jig/ed-sn-analysis.git

@@ -1,4 +1,8 @@
 usr/sbin/ed-config usr/sbin
+usr/sbin/ed-config-order usr/sbin
+ed-sn-analysis/parse_order_code.py usr/lib/ed-config/ed-sn-analysis
+ed-sn-analysis/scan_and_parse.py usr/lib/ed-config/ed-sn-analysis
+ed-sn-analysis/data/draft/product_code_parser.csv usr/lib/ed-config/ed-sn-analysis/data/draft
 usr/lib/ed-config/main.py usr/lib/ed-config
 usr/lib/ed-config/edconfig/*.py usr/lib/ed-config/edconfig
 usr/lib/ed-config/catalog usr/lib/ed-config

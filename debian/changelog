@@ -1,3 +1,16 @@
+ed-bsp-config (1.0.1) unstable; urgency=medium
+
+  * Add ed-config-order for ordering codes and scanner input. It selects tool
+    packages by default and supports explicit unattended confirmation with -y.
+  * Bundle the pinned ed-sn-analysis parser and ordering table in the DEB.
+    Initialize the parser submodule on demand from a source checkout.
+  * Add HMI2002_116C with ed-ddcci-mib-tool and HMI3320_156C/HMI3321_156C
+    with the corresponding SBC configuration.
+  * Map CM0NANO ordering codes to IPC1000 and CM4MED10 codes to CM4MEDIA.
+  * Document adding a model and using the ordering code entry point.
+
+ -- zjzhao <zjzhao@edatec.cn>  Wed, 18 Nov 2026 18:30:26 +0800
+
 ed-bsp-config (1.0.0) unstable; urgency=medium
 
   * Initial 1.0.0 release, packaging the current ed-config source and catalog.
