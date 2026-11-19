@@ -127,6 +127,10 @@ def main():
     cli.add_argument("order_code", nargs="?")
     cli.add_argument("-y", "--yes", action="store_true", help="install tool packages without prompting")
     args = cli.parse_args()
+    if os.geteuid() != 0:
+        print("ed-config-order: applying configuration requires root privileges; run with sudo",
+              file=sys.stderr)
+        return 2
     try:
         parser_dir, backend = paths()
         order_code, fields, serial = parsed_order(parser_dir, args.order_code)

@@ -1545,14 +1545,32 @@ def _atomic_symlink(path: Path, target: str) -> None:
 
 @contextmanager
 def _lock(root: Path) -> Iterator[None]:
+    if root == Path("/") and os.geteuid() != 0:
+        raise ApplyError("apply requires root privileges; run with sudo")
     path = rooted(root, "/run/lock/ed-config.lock")
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Preserve the lock inode used by older releases. O_CREAT on an existing
+    # user-owned file in /run/lock can be denied by fs.protected_regular.
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
-        with path.open("a+", encoding="utf-8") as stream:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            yield
-    except BlockingIOError as exc:
-        raise ApplyError("another ed-config process is already applying configuration") from exc
+        descriptor = os.open(path, flags)
+    except FileNotFoundError:
+        try:
+            descriptor = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            descriptor = os.open(path, flags)
+
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ApplyError(f"apply lock is not a regular file: {path}")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ApplyError("another ed-config process is already applying configuration") from exc
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def _backup(root: Path, operations: list[dict[str, Any]]) -> Path | None:

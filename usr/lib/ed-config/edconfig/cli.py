@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -240,6 +241,13 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
             return 2 if isinstance(exc, ConfigError) else 7
 
     args = parser().parse_args(arguments)
+    if args.command == "apply" and os.geteuid() != 0:
+        error = "apply requires root privileges; run with sudo"
+        if args.json:
+            _json({"success": False, "error": error}, stream=sys.stderr)
+        else:
+            print(f"ed-config: {error}", file=sys.stderr)
+        return 2
     try:
         catalog = Catalog(program_dir / "catalog")
         if args.command == "list":

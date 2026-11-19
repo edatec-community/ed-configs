@@ -25,6 +25,8 @@ The list includes every supported concrete model and variant. Model names are ca
 
 ## Apply a configuration
 
+Applying a configuration requires root privileges. Use `sudo` from a regular account.
+
 ```bash
 sudo ed-config apply -m IPC2130 -w -c
 sudo ed-config apply -m IPC2210 -d

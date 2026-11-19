@@ -31,6 +31,8 @@ ed-config list
 
 ## 应用型号配置
 
+应用配置需要 root 权限。普通用户请使用 `sudo`。
+
 ```bash
 sudo ed-config apply -m IPC2130
 sudo ed-config apply -m IPC1000
