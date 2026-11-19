@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|upgrade)
+        if [ -x /usr/bin/py3clean ]; then
+            /usr/bin/py3clean -p ed-bsp-config
+        fi
+        ;;
+esac
+
+#DEBHELPER#
