@@ -2,18 +2,18 @@
 
 [简体中文](README.md) · English
 
-`ed-config` configures EDATEC devices by product model. Maintainers can refer to the [guide to adding models](ADDING_MODEL.md).
+`ed-config` configures EDATEC devices by product model. Maintainers can refer to the [guide to adding models](ADDING_MODEL.en.md).
 
 ## Installation
 
-Download the DEB from [GitHub Releases](https://github.com/edatec-community/ed-configs/releases). To install version 1.0.1:
+Download the DEB from [GitHub Releases](https://github.com/edatec-community/ed-configs/releases). To install version 1.0.2:
 
 ```bash
-curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.1/ed-bsp-config_1.0.1_all.deb
-sudo apt install ./ed-bsp-config_1.0.1_all.deb
+curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.2/ed-bsp-config_1.0.2_all.deb
+sudo apt install ./ed-bsp-config_1.0.2_all.deb
 ```
 
-If the device cannot reach GitHub, download the package on another computer and copy it to the device. You can also use `sudo dpkg -i ./ed-bsp-config_1.0.1_all.deb` when the required dependencies are already available. The package requires Python 3.11 or later on Debian.
+If the device cannot reach GitHub, download the package on another computer and copy it to the device. You can also use `sudo dpkg -i ./ed-bsp-config_1.0.2_all.deb` when the required dependencies are already available. The package requires Python 3.11 or later on Debian.
 
 ## Supported models
 
@@ -63,7 +63,7 @@ sudo ed-config-order
 sudo ed-config-order 'ED-GWL2010-232-EU'
 ```
 
-You can also pass the complete scanner text on standard input. An optional serial number such as `ES264500508` can follow the code after a space or line break. The command displays the serial number and applies the model and options from the ordering code. GWL codes with CN, EU, or US select 470, 868, or 915 MHz, respectively. See the [ordering-code guide](ORDER_CODES.md) for examples.
+You can also pass the complete scanner text on standard input. An optional serial number such as `ES264500508` can follow the code after a space or line break. The command displays the serial number and applies the model and options from the ordering code. GWL codes with CN, EU, or US select 470, 868, or 915 MHz, respectively. See the [ordering-code guide](ORDER_CODES.en.md) for examples.
 
 ## Status, version, and help
 

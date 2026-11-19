@@ -1,3 +1,13 @@
+ed-bsp-config (1.0.2) unstable; urgency=medium
+
+  * Display serial numbers from scanned ordering codes.
+  * Provide Chinese and English versions of the repository documentation.
+  * Use SX1302 for GWL models and select the band from the ordering code.
+    Reject conflicting packages and region overrides, and apply the GWL2110
+    I2C, SPI, and reset settings.
+
+ -- zjzhao <zjzhao@edatec.cn>  Thu, 19 Nov 2026 11:29:25 +0800
+
 ed-bsp-config (1.0.1) unstable; urgency=medium
 
   * Add ed-config-order for ordering codes and scanner input. It selects tool
