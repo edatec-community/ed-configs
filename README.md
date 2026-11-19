@@ -1,5 +1,7 @@
 # ed-config
 
+简体中文 · [English](README.en.md)
+
 `ed-config` 用于根据 EDATEC 产品型号配置设备。
 
 维护人员可参考[新增型号指南](ADDING_MODEL.md)。
@@ -87,7 +89,7 @@ sudo ed-config apply -m IPC2130 -i -y
 
 `-l 4g`或`-l 5g`会自动选择`ed-clte`，`-s`会自动选择`ed-lvd`，无需同时指定`-i`。
 
-`-L`会自动选择对应的LoRa频段包，无需同时指定`-i`
+选择 LoRa 频段无需同时指定 `-i`。若已安装其他频段的 SX1302 包、旧 SX1303 包，或 `/etc/ed_gwl/region` 与所选频段冲突，应用会停止。
 
 
 本次实际安装了工具包，或配置变更涉及需要重启的项目时，会提示重启。包已安装且没有需要重启的配置变化时，不会要求重启。
@@ -99,6 +101,15 @@ sudo ed-config apply -m IPC2130 -i -y
 ```bash
 sudo reboot
 ```
+
+## 扫码配置
+
+```bash
+sudo ed-config-order
+sudo ed-config-order 'ED-GWL2010-232-EU'
+```
+
+也可以通过标准输入传入完整扫码文本。订购编码后可用空格或换行附加序列号，如 `ES264500508`。入口会显示序列号，并按订购型号和选项应用配置。GWL 订购编码的 CN、EU 和 US 分别选择 470、868 和 915 MHz。更多示例见[订购编码说明](ORDER_CODES.md)。
 
 ## 查看状态
 

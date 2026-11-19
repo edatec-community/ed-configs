@@ -59,7 +59,10 @@ def parsed_order(directory, code):
         isinstance(value, str) for value in fields.values()
     ):
         raise ValueError("invalid parser response")
-    return order_code, fields
+    serial = data.get("sn")
+    if serial is not None and (not isinstance(serial, str) or not re.fullmatch(r"ES[0-9]{9}", serial)):
+        raise ValueError("invalid parser serial number")
+    return order_code, fields, serial
 
 
 def resolve(order_code, fields):
@@ -126,11 +129,13 @@ def main():
     args = cli.parse_args()
     try:
         parser_dir, backend = paths()
-        order_code, fields = parsed_order(parser_dir, args.order_code)
+        order_code, fields, serial = parsed_order(parser_dir, args.order_code)
         model, flags, information = resolve(order_code, fields)
         models = json.loads(subprocess.check_output([backend, "list", "-j"], text=True))["models"]
         if model not in models:
             raise ValueError(f"unsupported model {model}; run 'ed-config list' for supported models")
+        if serial:
+            print(f"Serial number: {serial}", file=sys.stderr)
         if information:
             print("Order specifications outside ed-config: " + ", ".join(information), file=sys.stderr)
         command = [str(backend), "apply", "-m", model, "-i", *flags]

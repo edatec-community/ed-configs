@@ -19,7 +19,11 @@ from .errors import ApplyError, ConfigError
 from .operations import commands_digest, run_family_commands
 from .screen import managed_paths as screen_managed_paths
 from .screen import operations as screen_operations
-from .tool_packages import install_tool_packages, install_tool_packages_from_directory
+from .tool_packages import (
+    install_tool_packages,
+    install_tool_packages_from_directory,
+    missing_packages,
+)
 
 
 BEGIN = "# BEGIN EDATEC MANAGED CONFIG"
@@ -690,6 +694,47 @@ def _alsa_state_card_present(root: Path, names: set[str]) -> bool:
     return bool(card_ids & wanted)
 
 
+LORA_REGIONS = {"470": "CN470", "868": "EU868", "915": "US915"}
+
+
+def _check_lora_installation(root: Path, band: str) -> None:
+    conflicting = [
+        f"ed-gw{chip}-{other}"
+        for chip in ("1302", "1303")
+        for other in LORA_REGIONS
+        if (chip, other) != ("1302", band)
+    ]
+    missing = set(missing_packages(conflicting))
+    installed = [package for package in conflicting if package not in missing]
+    if installed:
+        raise ApplyError("conflicting LoRa packages are installed: " + ", ".join(installed))
+    path = rooted(root, "/etc/ed_gwl/region")
+    region = _read(path)
+    if region is not None and region.strip() != LORA_REGIONS[band]:
+        raise ApplyError(f"{path} conflicts with the selected LoRa region {LORA_REGIONS[band]}")
+
+
+def _prepare_lora_write(root: Path, operation: dict[str, Any]) -> None:
+    path = rooted(root, operation["path"])
+    original = _read(path)
+    if original is None:
+        raise ApplyError(f"missing SX1302 package file: {path}")
+    pattern, replacement = operation["_replacement"]
+    desired, count = re.subn(pattern, replacement, original, flags=re.MULTILINE)
+    if count != 1:
+        raise ApplyError(f"expected exactly one SX1302 setting in {path}")
+    metadata = path.stat()
+    operation.update(
+        changed=desired != original,
+        _target=path,
+        _original=original,
+        _original_mode=stat.S_IMODE(metadata.st_mode),
+        _original_uid=metadata.st_uid,
+        _original_gid=metadata.st_gid,
+        _content=desired,
+    )
+
+
 def build_plan(
     catalog: Catalog,
     resolution: dict[str, Any],
@@ -758,6 +803,28 @@ def build_plan(
             "_assume_yes": assume_yes,
             "_package_base_url": package_base_url,
         })
+
+    lora_band = next(
+        (option.removeprefix("lora.") for option in resolution["options"] if option.startswith("lora.")),
+        None,
+    )
+    if lora_band and resolution["model"] == "GWL2110":
+        operations.extend([
+            {
+                "kind": "lora",
+                "action": "write",
+                "path": "/opt/ed-lora/reset_lgw.sh",
+                "changed": True,
+                "_replacement": (r"^([ \t]*SX1302_RESET_PIN=)[^\s#]+", r"\g<1>8"),
+            },
+            {
+                "kind": "lora",
+                "action": "write",
+                "path": f"/opt/ed-lora/conf/global_conf.json.{LORA_REGIONS[lora_band]}",
+                "changed": True,
+                "_replacement": (r'("spidev_path"[ \t]*:[ \t]*)"[^"\n]*"', r'\g<1>"/dev/spidev1.0"'),
+            },
+        ])
 
     def write_operation(
         kind: str,
@@ -1403,6 +1470,7 @@ def build_plan(
         "_previous_screen_files": previous_screen_files,
         "_dirty_screen_paths": sorted(dirty_screen_paths),
         "_resolution": resolution,
+        **({"_lora_band": lora_band} if lora_band else {}),
     }
 
 
@@ -1599,6 +1667,8 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
     active_operation: dict[str, Any] | None = None
     phase = "backup"
     try:
+        if plan.get("_lora_band"):
+            _check_lora_installation(root, plan["_lora_band"])
         backup_dir = _backup(root, plan["operations"])
         ordered = sorted(
             plan["operations"],
@@ -1606,9 +1676,12 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
         )
         phase = "apply"
         for operation in ordered:
+            active_operation = operation
+            if operation["kind"] == "lora":
+                _prepare_lora_write(root, operation)
+                _backup(root, [operation])
             if not operation["changed"]:
                 continue
-            active_operation = operation
             if operation["kind"] == "tool_packages":
                 package_base_url = operation.get("_package_base_url")
                 if package_base_url is None:
@@ -1661,11 +1734,12 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
                 )
             completed.append(operation)
 
+        planned_paths = _operation_paths(plan["operations"])
         phase = "state_commit"
         completed_at = datetime.now(timezone.utc).isoformat()
         reboot_required = bool(plan["reboot_required"] or any(
-            operation.get("kind") == "tool_packages"
-            and operation.get("_installed_packages")
+            (operation["kind"] == "tool_packages" and operation.get("_installed_packages"))
+            or (operation["kind"] == "lora" and operation["changed"])
             for operation in plan["operations"]
         ))
         current = {

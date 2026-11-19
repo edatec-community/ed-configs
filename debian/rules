@@ -2,3 +2,6 @@
 
 %:
 	dh $@
+
+override_dh_compress:
+	dh_compress -XREADME.md -XREADME.en.md

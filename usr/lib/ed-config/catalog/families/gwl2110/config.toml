@@ -4,6 +4,7 @@ id = "gwl2110"
 platform = "CM4"
 
 config_lines = [
+    "dtparam=i2c_arm=on",
     "gpio=11=op,dl",
     "gpio=12=op,dl",
     "gpio=13=op,dl",
