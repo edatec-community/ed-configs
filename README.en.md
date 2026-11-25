@@ -6,14 +6,14 @@
 
 ## Installation
 
-Download the DEB from [GitHub Releases](https://github.com/edatec-community/ed-configs/releases). To install version 1.0.2:
+Download the DEB from [GitHub Releases](https://github.com/edatec-community/ed-configs/releases). To install version 1.0.3:
 
 ```bash
-curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.2/ed-bsp-config_1.0.2_all.deb
-sudo apt install ./ed-bsp-config_1.0.2_all.deb
+curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.3/ed-bsp-config_1.0.3_all.deb
+sudo apt install ./ed-bsp-config_1.0.3_all.deb
 ```
 
-If the device cannot reach GitHub, download the package on another computer and copy it to the device. You can also use `sudo dpkg -i ./ed-bsp-config_1.0.2_all.deb` when the required dependencies are already available. The package requires Python 3.11 or later on Debian.
+If the device cannot reach GitHub, download the package on another computer and copy it to the device. You can also use `sudo dpkg -i ./ed-bsp-config_1.0.3_all.deb` when the required dependencies are already available. The package requires Python 3.11 or later on Debian.
 
 ## Supported models
 

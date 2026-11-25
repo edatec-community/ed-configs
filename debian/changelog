@@ -1,3 +1,15 @@
+ed-bsp-config (1.0.3) unstable; urgency=medium
+
+  * Fix bug #2339: restore desktop recording volume control on IPC3020,
+    HMI3020_070C, and HMI3020_101C by preferring the RT5616 physical input
+    over the playback monitor. Upgrade existing managed WirePlumber rules.
+  * Add IPC2730 support with CAN FD, GPIO16 expansion interrupts,
+    model-specific packages, and the LTE LED setting.
+  * Require Linux 6.18.50 or later for apply. Validate boot overlay sources
+    before release and use bundled DTS fallbacks when required.
+
+ -- zjzhao <zjzhao@edatec.cn>  Wed, 25 Nov 2026 18:25:16 +0800
+
 ed-bsp-config (1.0.2) unstable; urgency=medium
 
   * Display serial numbers from scanned ordering codes.

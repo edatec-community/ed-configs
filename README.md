@@ -9,15 +9,15 @@
 ## 安装
 
 从 [GitHub Releases](https://github.com/edatec-community/ed-configs/releases) 下载对应版本的 DEB 包。
-安装 1.0.2 版：
+安装 1.0.3 版：
 
 ```bash
-curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.2/ed-bsp-config_1.0.2_all.deb
-sudo apt install ./ed-bsp-config_1.0.2_all.deb
+curl -fLO https://github.com/edatec-community/ed-configs/releases/download/v1.0.3/ed-bsp-config_1.0.3_all.deb
+sudo apt install ./ed-bsp-config_1.0.3_all.deb
 ```
 
 如果设备无法访问 GitHub，可在能访问的电脑上下载该包并复制到设备，然后执行上面的本地安装命令。
-也可在具备所需依赖的情况下使用 `sudo dpkg -i ./ed-bsp-config_1.0.2_all.deb`。
+也可在具备所需依赖的情况下使用 `sudo dpkg -i ./ed-bsp-config_1.0.3_all.deb`。
 
 安装软件包后，即可运行 `ed-config`。本包适用于 Python 3.11 或更新版本的 Debian 系统。
 
