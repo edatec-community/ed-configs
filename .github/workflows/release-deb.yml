@@ -1,4 +1,4 @@
-name: Build and publish DEB
+name: Validate release tag
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release:
@@ -24,7 +24,6 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 ./ed-config _validate -j
 
       - name: Check tag and package versions
-        id: version
         shell: bash
         run: |
           set -eu
@@ -38,39 +37,4 @@ jobs:
           if [ "$tag_version" != "$package_version" ] || [ "$tag_version" != "$app_version" ]; then
             echo "Tag $GITHUB_REF_NAME must match Debian version $package_version and application version $app_version." >&2
             exit 1
-          fi
-          echo "version=$package_version" >> "$GITHUB_OUTPUT"
-
-      - name: Build binary package
-        run: |
-          set -eu
-          dpkg-buildpackage -us -uc -b
-          mkdir -p dist
-          mv "../ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" dist/
-          dpkg-deb --info "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb"
-
-      - name: Verify packaged submodule contents
-        shell: bash
-        run: |
-          set -euo pipefail
-          stage="$(mktemp -d)"
-          mkdir "$stage/source"
-          git -C ed-sn-analysis archive "$(git rev-parse HEAD:ed-sn-analysis)" | tar -x -C "$stage/source"
-          dpkg-deb -x "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" "$stage/package"
-          diff -r "$stage/source" "$stage/package/usr/lib/ed-config/ed-sn-analysis"
-
-      - name: Create or update GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -eu
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" --clobber
-            legacy_asset="ed-config_${{ steps.version.outputs.version }}_all.deb"
-            assets="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
-            if printf '%s\n' "$assets" | grep -Fqx "$legacy_asset"; then
-              gh release delete-asset "$GITHUB_REF_NAME" "$legacy_asset" --yes
-            fi
-          else
-            gh release create "$GITHUB_REF_NAME" "dist/ed-bsp-config_${{ steps.version.outputs.version }}_all.deb" --title "$GITHUB_REF_NAME" --generate-notes
           fi
