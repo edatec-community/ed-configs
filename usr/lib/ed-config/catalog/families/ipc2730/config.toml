@@ -1,0 +1,26 @@
+format = "ed-config-family"
+version = 1
+id = "ipc2730"
+platform = "CM4"
+
+config_lines = [
+  "dtparam=spi=on",
+  "dtoverlay=spi0-2cs",
+  "dtoverlay=ed-spi6-2cs2,cs0_pin=18,cs1_pin=27,cs0_spidev=off,cs1_spidev=off",
+  "dtoverlay=ed-tcan4x5x,spi0-0,speed=17000000,interrupt=25",
+  "dtoverlay=ed-tcan4x5x,spi0-1,speed=17000000,interrupt=24",
+  "dtoverlay=ed-tcan4x5x,spi6-0,speed=17000000,interrupt=23",
+  "dtoverlay=ed-tcan4x5x,spi6-1,speed=17000000,interrupt=22",
+  "dtoverlay=i2c-rtc,pcf8563,i2c_csi_dsi",
+  "dtoverlay=ed-ipc,ipc2210,exp8x8y,exp_irq_pin=16",
+  "enable_uart=1",
+]
+
+[[overlay_fallbacks]]
+name = "ed-ipc"
+source = "ed-ipc-v2-overlay.dts"
+output = "ed-ipc-v2"
+
+[[udev_rules]]
+path = "/etc/udev/rules.d/70-can-rename.rules"
+content_file = "70-can-rename.rules"

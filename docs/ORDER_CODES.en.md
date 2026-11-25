@@ -24,10 +24,10 @@ The supported options above determine the device configuration. The following or
 
 Use `ed-config apply -d` to manually select the SATA setting for IPC2210 and IPC2220. Their ordering codes do not currently encode this setting.
 
-All 57 examples in the current parser table match, and 41 can be converted to configuration commands. The other 16 examples refer to these unsupported products and return an error.
+All 57 examples in the current parser table match, and 42 can be converted to configuration commands. The other 15 examples refer to these unsupported products and return an error.
 
 - AIC1000, AIC3000, AIC3000-200, AIC3100, CLAWBOX
 - CM4IO
-- IPC2700, IPC2730, IPC3030, IPC2642, PAC3020, PAC3110, PAC3630, TPM, XGW
+- IPC2700, IPC3030, IPC2642, PAC3020, PAC3110, PAC3630, TPM, XGW
 
 The HMI2320 and HMI2321 entries in the current ordering table cover 121C, 156C, and 215C.

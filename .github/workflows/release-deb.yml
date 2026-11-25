@@ -18,7 +18,10 @@ jobs:
           submodules: true
 
       - name: Install Debian packaging tools
-        run: sudo apt-get update && sudo apt-get install --yes build-essential debhelper
+        run: sudo apt-get update && sudo apt-get install --yes build-essential debhelper device-tree-compiler
+
+      - name: Validate Catalog and overlay sources
+        run: PYTHONDONTWRITEBYTECODE=1 ./ed-config _validate -j
 
       - name: Check tag and package versions
         id: version

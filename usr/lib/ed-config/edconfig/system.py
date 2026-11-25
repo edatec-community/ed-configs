@@ -17,6 +17,15 @@ from typing import Any, Iterator
 from .catalog import Catalog
 from .errors import ApplyError, ConfigError
 from .operations import commands_digest, run_family_commands
+from .overlays import (
+    KernelVersion,
+    OVERLAY_DIRECTORY,
+    compile_overlay,
+    declared_version,
+    kernel_version,
+    missing_capabilities,
+    overlay_request,
+)
 from .screen import managed_paths as screen_managed_paths
 from .screen import operations as screen_operations
 from .tool_packages import (
@@ -735,6 +744,79 @@ def _prepare_lora_write(root: Path, operation: dict[str, Any]) -> None:
     )
 
 
+def _prepare_boot_overlays(
+    catalog: Catalog,
+    resolution: dict[str, Any],
+    root: Path,
+    version: KernelVersion,
+    desired: list[str],
+    installing: list[str],
+    config: str,
+) -> tuple[list[str], dict[Path, bytes], list[str]]:
+    family_id, family = catalog._family_for_model(catalog.model_index[resolution["model"].casefold()])
+    capabilities = catalog.kernel_capabilities
+    fallbacks = {item["name"]: item for item in family.get("overlay_fallbacks", [])}
+
+    available = capabilities.available(version)
+    lines: list[str] = []
+    sources: dict[Path, Path] = {}
+    packages: set[str] = set()
+    before, after, _ = _split_managed_block(config)
+    active = _active_config_lines(before + after, resolution["identity"]["platform"])
+    for line in active:
+        key, _, value = line.partition("=")
+        if key.strip() in {"os_prefix", "overlay_prefix"} and value.strip().strip('"\'') not in (
+            {"", "overlays/"} if key.strip() == "overlay_prefix" else {""}
+        ):
+            raise ConfigError(f"overlay selection requires the standard boot directory; found {line}")
+    unmanaged: dict[str, set[str]] = {}
+    for line in active:
+        if request := overlay_request(line):
+            unmanaged.setdefault(request[0], set()).add(line.partition("#")[0].strip())
+    resolved_packages = set(resolution["tool_debs"]) | set(resolution["option_debs"])
+    for line in desired:
+        request = overlay_request(line)
+        if request is not None:
+            name, parameters = request
+            package = catalog.overlay_packages.get(name)
+            if package:
+                if package not in resolved_packages:
+                    raise ConfigError(f"overlay {name} requires unbound package {package}")
+                packages.add(package)
+            else:
+                missing = missing_capabilities(name, parameters, available)
+                native_path = rooted(root, f"{OVERLAY_DIRECTORY}/{name}.dtbo", allow_leaf_symlink=True, verify_leaf_symlink=True)
+                if not missing and not native_path.is_file():
+                    missing = f"system overlay file is missing: {native_path}"
+                fallback = fallbacks.get(name)
+                if missing and not fallback:
+                    release = ".".join(map(str, version))
+                    raise ConfigError(f"{resolution['model']} on kernel {release}: {missing}")
+                if fallback:
+                    output = fallback["output"]
+                    other_name = name if missing else output
+                    if other_name in unmanaged:
+                        raise ConfigError(f"conflicting unmanaged overlay {other_name} in config.txt")
+                    if missing:
+                        target = rooted(root, f"{OVERLAY_DIRECTORY}/{output}.dtbo")
+                        if not target.parent.is_dir():
+                            raise ConfigError(f"cannot locate the boot overlay directory: {target.parent}")
+                        sources[target] = catalog.family_directories[family_id.casefold()] / fallback["source"]
+                        _, separator, parameters_text = line.partition(",")
+                        line = f"dtoverlay={output}{separator}{parameters_text}"
+                    selected_name = output if missing else name
+                    if unmanaged.get(selected_name, set()) - {line}:
+                        raise ConfigError(f"conflicting unmanaged overlay {selected_name} in config.txt")
+        lines.append(line)
+
+    required = sorted(packages)
+    if required:
+        unavailable = set(missing_packages(required)) - set(installing)
+        if unavailable:
+            raise ConfigError(f"required overlay packages are missing: {', '.join(sorted(unavailable))}; run apply with -i")
+    return lines, {path: compile_overlay(source) for path, source in sources.items()}, required
+
+
 def build_plan(
     catalog: Catalog,
     resolution: dict[str, Any],
@@ -744,6 +826,7 @@ def build_plan(
     install_tools: bool = False,
     assume_yes: bool = False,
     package_base_url: str | None = None,
+    kernel_release: str | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     packages_to_install = (
@@ -756,6 +839,19 @@ def build_plan(
         raise ConfigError("tool package installation requires the running system root")
     if os_name not in {"auto", "ubuntu", "raspberrypi"}:
         raise ConfigError(f"unsupported OS selection: {os_name}")
+    if kernel_release is None and root == Path("/"):
+        kernel_release = os.uname().release
+    version = None
+    if kernel_release is not None:
+        version = kernel_version(kernel_release, running=True)
+        _, family = catalog._family_for_model(catalog.model_index[resolution["model"].casefold()])
+        required = family.get("minimum_kernel")
+        minimum = declared_version(required) if required else catalog.kernel_capabilities.baseline
+        if version < minimum:
+            minimum_text = ".".join(map(str, minimum))
+            raise ConfigError(
+                f"{resolution['model']} requires kernel {minimum_text} or later (running {kernel_release})"
+            )
     ubuntu = _detect_ubuntu(root) if os_name == "auto" else os_name == "ubuntu"
     config_path = _select_config(root)
     previous_family = _previous_family(catalog, root)
@@ -788,6 +884,14 @@ def build_plan(
     if ubuntu:
         disabled = set(catalog.ubuntu_disabled_lines)
         desired = [line for line in desired if line not in disabled]
+    original_config = _read(config_path)
+    overlay_files: dict[Path, bytes] = {}
+    overlay_packages: list[str] = []
+    if version is not None:
+        desired, overlay_files, overlay_packages = _prepare_boot_overlays(
+            catalog, resolution, root, version, desired,
+            packages_to_install, original_config or "",
+        )
 
     operations: list[dict[str, Any]] = []
     alsa_file_originals: dict[str, str | None] = {}
@@ -829,13 +933,16 @@ def build_plan(
     def write_operation(
         kind: str,
         path: Path,
-        content: str,
+        content: str | bytes,
         mode: int | None = None,
         uid: int | None = None,
         gid: int | None = None,
     ) -> None:
         rooted(root, "/" + path.relative_to(root).as_posix())
-        current = _read(path)
+        if isinstance(content, bytes):
+            current = path.read_bytes() if path.exists() else None
+        else:
+            current = _read(path)
         try:
             original_stat = path.stat()
         except OSError:
@@ -870,10 +977,26 @@ def build_plan(
             "_gid": gid,
         })
 
-    config_content = _config_content(
-        _read(config_path), desired, str(resolution["identity"]["platform"])
-    )
+    prior_hashes = previous_current.get("managed_file_hashes", {})
+    overlay_hashes = {
+        path: prior_hashes[path] for name in catalog.overlay_sources
+        if (path := f"{OVERLAY_DIRECTORY}/{name}.dtbo") in prior_hashes
+    } if isinstance(prior_hashes, dict) else {}
+    for target, content in overlay_files.items():
+        path = "/" + target.relative_to(root).as_posix()
+        write_operation("overlay", target, content, 0o644)
+        original = operations[-1]["_original"]
+        owned = original is None or overlay_hashes.get(path) == hashlib.sha256(original).hexdigest()
+        if operations[-1]["changed"] and not owned:
+            raise ConfigError(f"refusing to overwrite unmanaged overlay {path}")
+        if owned:
+            overlay_hashes[path] = hashlib.sha256(content).hexdigest()
+
+    config_content = _config_content(original_config, desired, str(resolution["identity"]["platform"]))
     write_operation("config", config_path, config_content)
+    if overlay_packages:
+        first_write = next(op for op in operations if op["kind"] != "tool_packages")
+        first_write["_overlay_packages"] = overlay_packages
 
     ddr_selected = "ddr" in resolution["options"]
     try:
@@ -955,7 +1078,7 @@ def build_plan(
         _tracked_managed_files(root, set(managed_file_contents))
         if previous_family is not None else {}
     )
-    managed_files_after: dict[str, str] = {}
+    managed_files_after: dict[str, str] = overlay_hashes
     managed_executables: set[str] = set()
 
     def known_managed_content(path: str, current: str | None) -> bool:
@@ -1454,7 +1577,7 @@ def build_plan(
         "product_code": resolution["product_code"],
         "reboot_required": any(
             op["changed"] and op["kind"] in {
-                "config", "cmdline", "family_command", "udev", "managed_file", "systemd", "wireplumber", "alsa_profile", "alsa_config", "alsa",
+                "config", "cmdline", "family_command", "udev", "managed_file", "systemd", "wireplumber", "alsa_profile", "alsa_config", "alsa", "overlay",
             }
             for op in operations
         ),
@@ -1490,7 +1613,7 @@ def public_plan(plan: dict[str, Any]) -> dict[str, Any]:
 
 def _atomic_write(
     path: Path,
-    content: str,
+    content: str | bytes,
     mode: int | None,
     uid: int | None = None,
     gid: int | None = None,
@@ -1515,8 +1638,8 @@ def _atomic_write(
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(content)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content if isinstance(content, bytes) else content.encode("utf-8"))
             stream.flush()
             os.fsync(stream.fileno())
         if write_mode is not None:
@@ -1695,6 +1818,9 @@ def _apply_plan_locked(plan: dict[str, Any]) -> dict[str, Any]:
         phase = "apply"
         for operation in ordered:
             active_operation = operation
+            if required := operation.get("_overlay_packages"):
+                if unavailable := missing_packages(required):
+                    raise ApplyError(f"required overlay packages are missing: {', '.join(unavailable)}")
             if operation["kind"] == "lora":
                 _prepare_lora_write(root, operation)
                 _backup(root, [operation])

@@ -1,0 +1,21 @@
+when_any_option = ["lte.4g", "lte.5g"]
+
+commands = [
+    '''
+set -eu
+config=/etc/ed-qml.conf
+if [ ! -f "$config" ]; then
+    printf '%s\n' "Missing $config after ed-clte installation." >&2
+    exit 1
+fi
+if grep -qE '^[[:blank:]]*lte_led[[:blank:]]*=' "$config"; then
+    exit 0
+fi
+setting='^[[:blank:]]*#[[:blank:]]*lte_led[[:blank:]]*=[[:blank:]]*4G_LED[[:blank:]]*$'
+if ! grep -qE "$setting" "$config"; then
+    printf '%s\n' "Missing the commented lte_led=4G_LED setting in $config." >&2
+    exit 1
+fi
+sed --follow-symlinks -i -E "0,/$setting/s/$setting/lte_led=4G_LED/" "$config"
+''',
+]

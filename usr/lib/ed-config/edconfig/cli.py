@@ -221,6 +221,7 @@ def main(argv: list[str] | None = None, program_dir: Path | None = None) -> int:
             return 2
         try:
             catalog = Catalog(program_dir / "catalog")
+            catalog.validate_overlay_sources()
             value = {
                 "valid": True,
                 "models": len(catalog.models),

@@ -284,6 +284,14 @@ subboard = "S_8X8Y2C"
 screen = "None"
 
 [[models]]
+name = "IPC2730"
+config = "ipc2730"
+platform = "CM4"
+board = "IPC2210"
+subboard = "S_8X8Y4C-SM"
+screen = "None"
+
+[[models]]
 name = "HMI3120_070C"
 config = "hmi3120_070c"
 platform = "CM5"

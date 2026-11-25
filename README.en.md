@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · English
 
-`ed-config` configures EDATEC devices by product model. Maintainers can refer to the [guide to adding models](ADDING_MODEL.en.md).
+`ed-config` configures EDATEC devices by product model. Maintainers can refer to the [guide to adding models](docs/ADDING_MODEL.en.md) and the [packaging guide](docs/PACKAGING.en.md).
 
 ## Installation
 
@@ -26,6 +26,7 @@ The list includes every supported concrete model and variant. Model names are ca
 ## Apply a configuration
 
 Applying a configuration requires root privileges. Use `sudo` from a regular account.
+All models require a running kernel of at least `6.18.50` for `apply`. Use `uname -r` to check the running version.
 
 ```bash
 sudo ed-config apply -m IPC2130 -w -c
@@ -65,7 +66,7 @@ sudo ed-config-order
 sudo ed-config-order 'ED-GWL2010-232-EU'
 ```
 
-You can also pass the complete scanner text on standard input. An optional serial number such as `ES264500508` can follow the code after a space or line break. The command displays the serial number and applies the model and options from the ordering code. GWL codes with CN, EU, or US select 470, 868, or 915 MHz, respectively. See the [ordering-code guide](ORDER_CODES.en.md) for examples.
+You can also pass the complete scanner text on standard input. An optional serial number such as `ES264500508` can follow the code after a space or line break. The command displays the serial number and applies the model and options from the ordering code. GWL codes with CN, EU, or US select 470, 868, or 915 MHz, respectively. See the [ordering-code guide](docs/ORDER_CODES.en.md) for examples.
 
 ## Status, version, and help
 

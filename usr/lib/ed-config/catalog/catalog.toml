@@ -2,6 +2,7 @@ format = "ed-config-catalog"
 version = 4
 models_file = "models.toml"
 tool_packages_file = "tool-packages.toml"
+kernel_capabilities_file = "kernel-capabilities.toml"
 families_dir = "families"
 options_file = "options.toml"
 codes_file = "hardware/codes.toml"

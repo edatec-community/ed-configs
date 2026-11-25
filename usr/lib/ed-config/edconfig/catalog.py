@@ -8,6 +8,14 @@ from typing import Any
 
 from .errors import ConfigError
 from .operations import parse_family_commands
+from .overlays import (
+    KernelCapabilities,
+    compile_overlay,
+    declared_version,
+    identifier,
+    missing_capabilities,
+    overlay_request,
+)
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -58,6 +66,8 @@ class Catalog:
         "alsa_profile_set_target",
         "alsa_profile_path_files",
         "alsa_profile_path_targets",
+        "overlay_fallbacks",
+        "minimum_kernel",
     }
     _RULE_FIELDS = {"path", "content_file", "default_file", "ubuntu_file", "exact_content"}
     _MANAGED_FILE_FIELDS = {"path", "content_file", "mode", "option"}
@@ -95,11 +105,15 @@ class Catalog:
 
         self.data_paths: set[Path] = {self.manifest_path}
         self.family_directories: dict[str, Path] = {}
-        self.family_commands: dict[str, list[str]] = {}
+        self.family_commands: dict[str, tuple[list[str], set[str]]] = {}
         self.systemd_service_targets: dict[str, str] = {}
         self.systemd_service_links: dict[str, str] = {}
         self.models_path, models = self._load_file("models_file")
         self.tool_packages_path, tool_packages = self._load_file("tool_packages_file")
+        _, capabilities = self._load_file("kernel_capabilities_file")
+        self.kernel_capabilities = KernelCapabilities(capabilities)
+        self.overlay_packages: dict[str, str] = {}
+        self.overlay_sources: dict[str, Path] = {}
         self.options_path, options = self._load_file("options_file")
         self.codes_path, self.codes = self._load_file("codes_file")
         for path, document in (
@@ -155,7 +169,7 @@ class Catalog:
                 raise ConfigError(
                     f"{path}: package {raw_name} must declare families, models, or options"
                 )
-            unknown_scopes = sorted(set(raw_targets) - set(scopes))
+            unknown_scopes = sorted(set(raw_targets) - set(scopes) - {"overlays"})
             if unknown_scopes:
                 raise ConfigError(
                     f"{path}: package {raw_name} has unknown target scopes: "
@@ -171,6 +185,13 @@ class Catalog:
                     raise ConfigError(
                         f"{path}: {scope} for {raw_name} must be a non-empty array of names"
                     )
+                if scope == "overlays":
+                    for name in values:
+                        if not identifier(name) or name in self.overlay_packages:
+                            raise ConfigError(f"{path}: invalid or duplicate package overlay {name!r}")
+                        self.overlay_packages[name] = raw_name
+                    targets[scope] = values
+                    continue
                 index, kind = scopes[scope]
                 canonical: list[str] = []
                 seen: set[str] = set()
@@ -193,6 +214,8 @@ class Catalog:
                     else:
                         canonical.append(found[0])
                 targets[scope] = canonical
+            if not set(targets).intersection(scopes):
+                raise ConfigError(f"{path}: package {raw_name} must have an installation target")
             result[raw_name] = targets
         return result
 
@@ -272,17 +295,22 @@ class Catalog:
 
     def _load_family_commands(
         self, family_id: str, package_dir: Path
-    ) -> list[str]:
+    ) -> tuple[list[str], set[str]]:
         path = package_dir / "commands.toml"
         if not path.exists() and not path.is_symlink():
-            return []
+            return [], set()
         resolved_path = path.resolve()
         if package_dir.resolve() not in resolved_path.parents or not resolved_path.is_file():
             raise ConfigError(f"family package {family_id} has an unsafe commands.toml")
         document = _read_toml(resolved_path)
+        conditions = document.pop("when_any_option", [])
+        if not isinstance(conditions, list) or any(
+            not isinstance(name, str) or name not in self.options for name in conditions
+        ) or len(set(conditions)) != len(conditions):
+            raise ConfigError(f"{resolved_path}: when_any_option must list distinct known options")
         result = parse_family_commands(document, resolved_path)
         self.data_paths.add(resolved_path)
-        return result
+        return result, set(conditions)
 
     @staticmethod
     def _valid_package_names(value: Any) -> bool:
@@ -364,6 +392,37 @@ class Catalog:
                     f"0x{product_code:08x}"
                 )
             product_codes[product_code] = str(model["name"])
+
+    def validate_overlay_sources(self) -> None:
+        for model in self.models:
+            name = model["name"]
+            _, family = self._family_for_model(model)
+            minimum = family.get("minimum_kernel")
+            version = declared_version(minimum) if minimum else self.kernel_capabilities.baseline
+            available = self.kernel_capabilities.available(version)
+            fallbacks = {item["name"] for item in family.get("overlay_fallbacks", [])}
+            selections = [[]] + [
+                [option] for option in self.options if not self._option_error(model, family, option)
+            ]
+            for selection in selections:
+                resolved = self.resolve_model(name, selection)
+                packages = {*resolved["tool_debs"], *resolved["option_debs"]}
+                for item in resolved["config_lines"]:
+                    line = item["value"]
+                    request = overlay_request(line)
+                    if request is None:
+                        continue
+                    overlay, parameters = request
+                    package = self.overlay_packages.get(overlay)
+                    if package:
+                        if package not in packages:
+                            raise ConfigError(f"{name}: {line} requires unbound package {package}")
+                    else:
+                        missing = missing_capabilities(overlay, parameters, available)
+                        if missing and overlay not in fallbacks:
+                            raise ConfigError(f"{name}: {line} has no source at kernel {'.'.join(map(str, version))}: {missing}")
+        for source in self.overlay_sources.values():
+            compile_overlay(source)
 
     def _validate_code_tables(self) -> None:
         specifications = {
@@ -639,6 +698,30 @@ class Catalog:
         targets: set[str] = set()
         for rule in rules:
             self._validate_rule(family_id, rule, targets)
+        if "minimum_kernel" in family:
+            if declared_version(family["minimum_kernel"]) < self.kernel_capabilities.baseline:
+                raise ConfigError(f"{family_id}: minimum_kernel precedes the overlay baseline")
+        fallbacks = family.get("overlay_fallbacks", [])
+        if not isinstance(fallbacks, list):
+            raise ConfigError(f"{family_id}: overlay_fallbacks must be an array")
+        names: set[str] = set()
+        native = set().union(*(release.keys() for release in self.kernel_capabilities.releases.values()))
+        for fallback in fallbacks:
+            if not isinstance(fallback, dict) or set(fallback) != {"name", "output", "source"}:
+                raise ConfigError(f"{family_id}: invalid overlay fallback")
+            name, output, source = (fallback[key] for key in ("name", "output", "source"))
+            if (
+                not identifier(name) or name in names or name in self.overlay_packages
+                or not identifier(output) or output == name or output in native
+                or output in self.overlay_packages
+                or source not in (f"{output}-overlay.dts", f"{output}.dts")
+            ):
+                raise ConfigError(f"{family_id}: invalid or conflicting overlay fallback {fallback!r}")
+            names.add(name)
+            path = self._rule_file(self.family_directories[family_id.casefold()], source, family_id)
+            existing = self.overlay_sources.setdefault(output, path)
+            if existing != path and existing.read_bytes() != path.read_bytes():
+                raise ConfigError(f"{family_id}: conflicting DTS sources for {output}")
 
     @staticmethod
     def _service_install_target(path: Path, family_id: str, service: str) -> str:
@@ -899,6 +982,16 @@ class Catalog:
                 )
             scalar[key] = line
 
+    def _option_error(self, model: dict[str, Any], family: dict[str, Any], name: str) -> str:
+        if name.casefold() in {item.casefold() for item in family.get("unsupported_options", [])}:
+            return f"option {name} is not supported for model {model['name']}"
+        allowed_models = self.options[name].get("models")
+        if allowed_models is not None and model["name"].casefold() not in {
+            str(item).casefold() for item in allowed_models
+        }:
+            return f"option {name} is only supported for models: {', '.join(allowed_models)}"
+        return ""
+
     def resolve(self, requested: str, option_names: list[str]) -> dict[str, Any]:
         model = self.model_index.get(requested.casefold())
         if model is None:
@@ -906,16 +999,9 @@ class Catalog:
         family_id, family = self._family_for_model(model)
         options = self.canonical_options(option_names)
         for name in options:
-            unsupported_options = family.get("unsupported_options", [])
-            if name.casefold() in {item.casefold() for item in unsupported_options}:
-                raise ConfigError(f"option {name} is not supported for model {model['name']}")
-            allowed_models = self.options[name].get("models")
-            if allowed_models is not None and str(model["name"]).casefold() not in {
-                str(item).casefold() for item in allowed_models
-            }:
-                raise ConfigError(
-                    f"option {name} is only supported for models: {', '.join(allowed_models)}"
-                )
+            error = self._option_error(model, family, name)
+            if error:
+                raise ConfigError(error)
         lines = [
             {"order": index + 10, "value": str(value)}
             for index, value in enumerate(family["config_lines"])
@@ -987,6 +1073,9 @@ class Catalog:
             if str(asset["path"]).endswith(".service")
         }
 
+        commands, command_options = self.family_commands[family_id.casefold()]
+        if command_options and command_options.isdisjoint(options):
+            commands = []
         return {
             "format": "ed-config-resolution",
             "schema_version": 3,
@@ -1030,7 +1119,7 @@ class Catalog:
                 for index, path in enumerate(family.get("alsa_profile_path_files", []))
             ],
             "tool_debs": self._base_tool_packages(model, family_id),
-            "commands": list(self.family_commands.get(family_id.casefold(), [])),
+            "commands": list(commands),
             "managed_files": managed_files,
             "systemd_services": [
                 service

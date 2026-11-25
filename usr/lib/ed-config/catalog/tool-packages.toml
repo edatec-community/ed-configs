@@ -10,7 +10,7 @@ families = [
     "hmi3010_101c", "hmi3020_070c", "hmi3020_101c", "hmi3120_070c",
     "hmi3120_101c", "hmi3630_101c", "ipc1000", "ipc1100", "ipc1200",
     "ipc1220", "ipc2010", "ipc2100", "ipc2200", "ipc2400", "ipc2610",
-    "ipc2620", "ipc2630", "ipc3020", "ipc3100", "ipc3200", "ipc3400",
+    "ipc2620", "ipc2630", "ipc2730", "ipc3020", "ipc3100", "ipc3200", "ipc3400",
     "ipc3600", "plc2010", "sbc2300", "sbc3300",
 ]
 
@@ -21,9 +21,16 @@ families = [
     "hmi2220_101c", "hmi2630_101c", "hmi3020_070c", "hmi3020_101c",
     "hmi3120_070c", "hmi3120_101c", "hmi3630_101c", "ipc1000", "ipc1100",
     "ipc1200", "ipc1220", "ipc2010", "ipc2100", "ipc2200", "ipc2400",
-    "ipc2610", "ipc2620", "ipc2630", "ipc3020", "ipc3100", "ipc3200",
+    "ipc2610", "ipc2620", "ipc2630", "ipc2730", "ipc3020", "ipc3100", "ipc3200",
     "ipc3600", "plc2010", "sbc2300", "sbc3300",
 ]
+
+[packages.ed-tcan4x5x-dkms]
+families = ["ipc2730"]
+overlays = ["ed-tcan4x5x", "ed-spi6-2cs2"]
+
+[packages.ed-rtc-watchdog]
+families = ["ipc2730"]
 
 [packages.ed-usb-tools]
 families = [
@@ -35,6 +42,7 @@ families = [
 
 [packages.ed-wk2xxx-uart-firmware]
 families = ["ipc1200", "ipc1220", "sbc2300", "sbc3300"]
+overlays = ["wk2xxx-uart"]
 
 [packages.ed-mgmt]
 families = ["ipc1200", "ipc1220"]

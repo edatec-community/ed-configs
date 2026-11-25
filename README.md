@@ -4,7 +4,7 @@
 
 `ed-config` 用于根据 EDATEC 产品型号配置设备。
 
-维护人员可参考[新增型号指南](ADDING_MODEL.md)。
+维护人员可参考[新增型号指南](docs/ADDING_MODEL.md)和[构建与发布指南](docs/PACKAGING.md)。
 
 ## 安装
 
@@ -32,6 +32,7 @@ ed-config list
 ## 应用型号配置
 
 应用配置需要 root 权限。普通用户请使用 `sudo`。
+所有型号执行 `apply` 都要求当前运行的内核至少为 `6.18.50`。可用 `uname -r` 查看当前版本。
 
 ```bash
 sudo ed-config apply -m IPC2130
@@ -111,7 +112,7 @@ sudo ed-config-order
 sudo ed-config-order 'ED-GWL2010-232-EU'
 ```
 
-也可以通过标准输入传入完整扫码文本。订购编码后可用空格或换行附加序列号，如 `ES264500508`。入口会显示序列号，并按订购型号和选项应用配置。GWL 订购编码的 CN、EU 和 US 分别选择 470、868 和 915 MHz。更多示例见[订购编码说明](ORDER_CODES.md)。
+也可以通过标准输入传入完整扫码文本。订购编码后可用空格或换行附加序列号，如 `ES264500508`。入口会显示序列号，并按订购型号和选项应用配置。GWL 订购编码的 CN、EU 和 US 分别选择 470、868 和 915 MHz。更多示例见[订购编码说明](docs/ORDER_CODES.md)。
 
 ## 查看状态
 

@@ -1,6 +1,6 @@
 # Building and releasing the DEB package
 
-[简体中文](README.md) · English
+[简体中文](PACKAGING.md) · English
 
 Build the binary package on Debian or Ubuntu with the Debian packaging tools installed:
 

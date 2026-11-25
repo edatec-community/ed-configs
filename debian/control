@@ -10,7 +10,7 @@ Homepage: https://github.com/edatec-community/ed-configs
 
 Package: ed-bsp-config
 Architecture: all
-Depends: python3 (>= 3.11), ${misc:Depends}
+Depends: python3 (>= 3.11), device-tree-compiler, ${misc:Depends}
 Provides: ed-config (= ${binary:Version})
 Breaks: ed-config (<< 1.0.1)
 Replaces: ed-config (<< 1.0.1)

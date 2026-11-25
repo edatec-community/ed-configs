@@ -1,6 +1,6 @@
 # 构建和发布 DEB 包
 
-简体中文 · [English](README.en.md)
+简体中文 · [English](PACKAGING.en.md)
 
 在 Debian 或 Ubuntu 上安装打包工具后构建二进制包：
 
